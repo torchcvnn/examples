@@ -1,0 +1,3 @@
+torchcvnn
+torchvision
+tqdm
