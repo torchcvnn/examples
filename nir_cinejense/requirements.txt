@@ -1,0 +1,4 @@
+torch 
+torchcvnn
+tqdm
+matplotlib
