@@ -30,9 +30,24 @@ Long Axis (LAX).
 
 If multiple patient data are provided, the script will sample one of them randomly.
 
+The installation is done in two steps 
+
 ```bash
 python -m pip install -r requirements.txt
+python -m pip install git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
+```
+
+The tinycudann installation may complain if the version of torch, installed during the first step is not using the cuda version for which you have installed the librairies. You may need to overwrite the installed torch version by installing the one supporting the right cuda version and listed on [https://pytorch.org/get-started/previous-versions/](https://pytorch.org/get-started/previous-versions).
+
+Once the dependencies are installed and you have the data available, you should be able to run the code : 
+
+```
 python nir_miccai2023.py --rootdir /path/to/the/data --acc_factor ACC10 --view SAX
 ```
 
-Below are shown some examples for different acceleration factors and LAX/SAX.
+## Examples
+
+The examples below have been produced on a GTX GeForce 3080 
+
+
+
