@@ -51,7 +51,9 @@ The examples below have been produced on a GTX GeForce 3090, taking 2 minutes pe
 
 They were executed with numpy==1.26.4 tinycudann==1.7 torchcvnn==0.8.0 torch==2.0.1
 
-```
-python nir_miccai2023.py --rootdir /path/to/the/data --acc_factor ACC10 --view SAX
-```
+
+- ACC10, LAX, patient P014, PSNR=
+
+![ACC10, LAX, P014]](https://github.com/torchcvnn/examples/blob/nir_cinejense/nir_cinejense/gifs/acc10_lax_p014.gif?raw=true)
+
 
