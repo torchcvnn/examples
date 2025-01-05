@@ -13,7 +13,7 @@ For running this example, you need to download the data from the [CMRxRecon MICC
 challenge](https://cmrxrecon.github.io/Home.html). See also the github of the
 challenge to access the data [https://github.com/CmrxRecon/CMRxRecon2024](https://github.com/CmrxRecon/CMRxRecon2024)
 
-The data directory is expected to follow the structure below :
+The data directory is expected to follow the structure used by [torchcvnn](https://torchcvnn.github.io/torchcvnn/modules/datasets.html#torchcvnn.datasets.MICCAI2023).
 
 	rootdir/ChallengeData/MultiCoil/cine/TrainingSet/P{id}/
 								- cine_sax.mat
@@ -28,12 +28,11 @@ The data directory is expected to follow the structure below :
 The script supports the three acceleration factors and both the Short Axis (SAX) and
 Long Axis (LAX).
 
-If multiple patient data are provided, the script will sample one of them
-randomly.
+If multiple patient data are provided, the script will sample one of them randomly.
 
 ```bash
 python -m pip install -r requirements.txt
-python nir_miccai2023.py --rootdir /path/to/the/data --acc_factor ACC10 --view
-SAX
+python nir_miccai2023.py --rootdir /path/to/the/data --acc_factor ACC10 --view SAX
 ```
 
+Below are shown some examples for different acceleration factors and LAX/SAX.
