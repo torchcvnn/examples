@@ -54,6 +54,6 @@ They were executed with numpy==1.26.4 tinycudann==1.7 torchcvnn==0.8.0 torch==2.
 
 - ACC10, LAX, patient P014, PSNR=
 
-![ACC10, LAX, P014]](https://github.com/torchcvnn/examples/blob/nir_cinejense/nir_cinejense/gifs/acc10_lax_p014.gif?raw=true)
+![ACC10, LAX, P014](https://github.com/torchcvnn/examples/blob/nir_cinejense/nir_cinejense/gifs/acc10_lax_p014.gif?raw=true)
 
 
