@@ -51,6 +51,10 @@ The examples below have been produced on a GTX GeForce 3090, taking 2 minutes pe
 
 They were executed with numpy==1.26.4 tinycudann==1.7 torchcvnn==0.8.0 torch==2.0.1
 
+- ACC4, SAX, patient P002, mean PSNR=$42.19$ (mean over the $12$ frames, for slice number $5$)
+
+![ACC4, SAX, P002](https://github.com/torchcvnn/examples/blob/nir_cinejense/nir_cinejense/gifs/acc4_sax_p002.gif?raw=true)
+
 
 - ACC10, LAX, patient P014, PSNR=
 
