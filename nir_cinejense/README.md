@@ -47,7 +47,11 @@ python nir_miccai2023.py --rootdir /path/to/the/data --acc_factor ACC10 --view S
 
 ## Examples
 
-The examples below have been produced on a GTX GeForce 3080 
+The examples below have been produced on a GTX GeForce 3090, taking 2 minutes per slice.
 
+They were executed with numpy==1.26.4 tinycudann==1.7 torchcvnn==0.8.0 torch==2.0.1
 
+```
+python nir_miccai2023.py --rootdir /path/to/the/data --acc_factor ACC10 --view SAX
+```
 
