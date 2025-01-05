@@ -55,6 +55,9 @@ They were executed with numpy==1.26.4 tinycudann==1.7 torchcvnn==0.8.0 torch==2.
 
 ![ACC4, SAX, P002](https://github.com/torchcvnn/examples/blob/nir_cinejense/nir_cinejense/gifs/acc4_sax_p002.gif?raw=true)
 
+- ACC4, LAX, patient P012, mean PSNR= $41.97$ (mean over the $12$ frames, for slice number $1$)
+
+![ACC4, LAX, P012](https://github.com/torchcvnn/examples/blob/nir_cinejense/nir_cinejense/gifs/acc4_lax_p012.gif?raw=true)
 
 - ACC10, LAX, patient P014, PSNR=
 
