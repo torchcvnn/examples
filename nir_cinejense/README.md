@@ -55,28 +55,28 @@ They were executed with numpy==1.26.4 tinycudann==1.7 torchcvnn==0.8.0 torch==2.
 
 - ACC4, SAX, patient P002, mean PSNR= $42.19$ (mean over the $12$ frames, for slice number $5$)
 
-![ACC4, SAX, P002](https://github.com/torchcvnn/examples/blob/nir_cinejense/nir_cinejense/gifs/acc4_sax_p002.gif?raw=true)
+![ACC4, SAX, P002](https://github.com/torchcvnn/examples/blob/main/nir_cinejense/gifs/acc4_sax_p002.gif?raw=true)
 
 - ACC4, LAX, patient P012, mean PSNR= $41.97$ (mean over the $12$ frames, for slice number $1$)
 
-![ACC4, LAX, P012](https://github.com/torchcvnn/examples/blob/nir_cinejense/nir_cinejense/gifs/acc4_lax_p012.gif?raw=true)
+![ACC4, LAX, P012](https://github.com/torchcvnn/examples/blob/main/nir_cinejense/gifs/acc4_lax_p012.gif?raw=true)
 
 ### Acceleration Factor 8
 
 - ACC8, SAX, patient P063, mean PSNR= $34.59$ (mean over the $12$ frames, for slice number $5$)
 
-![ACC8, SAX, P063](https://github.com/torchcvnn/examples/blob/nir_cinejense/nir_cinejense/gifs/acc8_sax_p063.gif?raw=true)
+![ACC8, SAX, P063](https://github.com/torchcvnn/examples/blob/main/nir_cinejense/gifs/acc8_sax_p063.gif?raw=true)
 
 - ACC8, LAX, patient P001, mean PSNR= $36.48$ (mean over the $12$ frames, for slice number $1$)
 
-![ACC8, LAX, P001](https://github.com/torchcvnn/examples/blob/nir_cinejense/nir_cinejense/gifs/acc8_lax_p001.gif?raw=true)
+![ACC8, LAX, P001](https://github.com/torchcvnn/examples/blob/main/nir_cinejense/gifs/acc8_lax_p001.gif?raw=true)
 
 ### Acceleration Factor 10
 
 - ACC10, SAX, patient P107, mean PSNR= $34.83$ (mean over the $12$ frames, for slice number $5$)
 
-![ACC10, SAX, P107](https://github.com/torchcvnn/examples/blob/nir_cinejense/nir_cinejense/gifs/acc10_sax_p107.gif?raw=true)
+![ACC10, SAX, P107](https://github.com/torchcvnn/examples/blob/main/nir_cinejense/gifs/acc10_sax_p107.gif?raw=true)
 
 - ACC10, LAX, patient P014, mean PSNR= $31.44$ (mean over the $12$ frames, for slice number $1$)
 
-![ACC10, LAX, P014](https://github.com/torchcvnn/examples/blob/nir_cinejense/nir_cinejense/gifs/acc10_lax_p014.gif?raw=true)
+![ACC10, LAX, P014](https://github.com/torchcvnn/examples/blob/main/nir_cinejense/gifs/acc10_lax_p014.gif?raw=true)
