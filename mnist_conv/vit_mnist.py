@@ -144,6 +144,7 @@ class PatchEmbedder(nn.Module):
 
     def forward(self, x):
         patch_embeddings = self.embedder(x)  # (B, embed_dim, num_patch_H, num_patch_W)
+        patch_embeddings = torch.fft.fft2(patch_embeddings)
 
         num_patches_H, num_patches_W = patch_embeddings.shape[2:]
 
@@ -151,9 +152,7 @@ class PatchEmbedder(nn.Module):
         pos_emb = self.rope_embedding(
             num_patches_H, num_patches_W, patch_embeddings.shape[1], device=x.device
         )
-        patch_embeddings = patch_embeddings + pos_emb
-
-        return patch_embeddings
+        return patch_embeddings + pos_emb
 
 
 class Model(nn.Module):
@@ -168,11 +167,11 @@ class Model(nn.Module):
         dropout = 0.1
         attention_dropout = 0.1
         # norm_layer = PseudoNorm
-        norm_layer = c_nn.RMSNorm
-        # norm_layer = c_nn.LayerNorm
+        norm_layer = nn.RMSNorm
+        # norm_layer = nn.LayerNorm
         patch_size = 7
 
-        embedder = PatchEmbedder(28, 1, hidden_dim, patch_size, norm_layer=norm_layer)
+        embedder = PatchEmbedder(28, 1, hidden_dim, patch_size, norm_layer=norm_layer, dtype=torch.float32)
 
         # For using an off-the shelf ViT model, you can use the following code
         # If you go this way, do not forget to adapt the hidden_dim above
@@ -195,7 +194,7 @@ class Model(nn.Module):
             mlp_dim,
             dropout=dropout,
             attention_dropout=attention_dropout,
-            norm_layer=norm_layer,
+            norm_layer=c_nn.RMSNorm,
         )
 
         # A Linear decoding head to project on the logits
@@ -433,7 +432,7 @@ def lightning_train(version: int):
         train=True,
         download=True,
         transform=v2_transforms.Compose(
-            [v2_transforms.PILToTensor(), v2_transforms.ToDtype(cdtype)]
+            [v2_transforms.PILToTensor(), v2_transforms.ToDtype(torch.float32)]
         ),
     )
     valid_dataset = torchvision.datasets.MNIST(
@@ -441,7 +440,7 @@ def lightning_train(version: int):
         train=False,
         download=True,
         transform=v2_transforms.Compose(
-            [v2_transforms.PILToTensor(), v2_transforms.ToDtype(cdtype)]
+            [v2_transforms.PILToTensor(), v2_transforms.ToDtype(torch.float32)]
         ),
     )
 
