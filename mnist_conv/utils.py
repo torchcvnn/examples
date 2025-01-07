@@ -30,6 +30,11 @@ import torch
 import torch.nn as nn
 import tqdm
 
+from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.callbacks.progress import TQDMProgressBar
+from lightning.pytorch.callbacks.progress.tqdm_progress import Tqdm
+from lightning.pytorch.utilities import rank_zero_only
+
 # import torch.onnx
 
 
@@ -236,3 +241,30 @@ def generate_unique_logpath(logdir: str, raw_run_name: str) -> str:
             os.makedirs(log_path)
             return log_path
         i = i + 1
+
+
+class TBLogger(TensorBoardLogger):
+    @rank_zero_only
+    def log_metrics(self, metrics, step):
+        metrics.pop('epoch', None)
+        metrics = {k: v for k, v in metrics.items() if ('step' not in k) and ('val' not in k)}
+        return super().log_metrics(metrics, step)
+    
+    
+class CustomProgressBar(TQDMProgressBar):
+    
+    def get_metrics(self, trainer, model):
+        items = super().get_metrics(trainer, model)
+        items.pop("v_num", None)
+        return items
+    
+    def init_train_tqdm(self) -> Tqdm:
+        """Override this to customize the tqdm bar for training."""
+        bar = super().init_train_tqdm()
+        bar.ascii = ' >'
+        return bar
+    
+    def init_validation_tqdm(self):
+        bar = super().init_validation_tqdm()
+        bar.ascii = ' >'
+        return bar
