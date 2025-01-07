@@ -1,0 +1,7 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+
+# data & folders generated during test runs
+data/
+training_logs/
+weights_storage/
