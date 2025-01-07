@@ -1,0 +1,4 @@
+torchcvnn
+timm
+numpy
+torchvision
