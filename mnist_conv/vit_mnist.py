@@ -31,7 +31,6 @@ Requires dependencies :
 
 # Standard imports
 import random
-import sys
 from typing import List, Tuple, Union
 
 # External imports
@@ -42,15 +41,10 @@ import torchvision.transforms.v2 as v2_transforms
 
 import lightning as L
 from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
-from lightning.pytorch.loggers import TensorBoardLogger
-from lightning.pytorch.callbacks.progress import TQDMProgressBar
-from lightning.pytorch.callbacks.progress.tqdm_progress import Tqdm
-from lightning.pytorch.utilities import rank_zero_only
 
 from torchmetrics.classification import Accuracy
 
 import torchcvnn.nn as c_nn
-import torchcvnn.models as c_models
 
 # Local imports
 import utils
@@ -311,33 +305,6 @@ def train():
 
 
 # Pytorch Lightning code
-class TBLogger(TensorBoardLogger):
-    @rank_zero_only
-    def log_metrics(self, metrics, step):
-        metrics.pop('epoch', None)
-        metrics = {k: v for k, v in metrics.items() if ('step' not in k) and ('val' not in k)}
-        return super().log_metrics(metrics, step)
-    
-    
-class CustomProgressBar(TQDMProgressBar):
-    
-    def get_metrics(self, trainer, model):
-        items = super().get_metrics(trainer, model)
-        items.pop("v_num", None)
-        return items
-    
-    def init_train_tqdm(self) -> Tqdm:
-        """Override this to customize the tqdm bar for training."""
-        bar = super().init_train_tqdm()
-        bar.ascii = ' >'
-        return bar
-    
-    def init_validation_tqdm(self):
-        bar = super().init_validation_tqdm()
-        bar.ascii = ' >'
-        return bar
-
-
 class cMNISTModel(L.LightningModule):
 
     def __init__(self):
@@ -423,7 +390,6 @@ class cMNISTModel(L.LightningModule):
 def lightning_train(version: int):
     batch_size = 64
     epochs = 15
-    cdtype = torch.complex64
     torch.set_float32_matmul_precision('high')
 
     # Dataloading
@@ -471,7 +437,7 @@ def lightning_train(version: int):
         benchmark=True,
         enable_checkpointing=True,
         callbacks=[
-            CustomProgressBar(),
+            utils.CustomProgressBar(),
             EarlyStopping(
                 monitor='val_loss', 
                 verbose=True,
@@ -487,8 +453,8 @@ def lightning_train(version: int):
             )
         ],
         logger=[
-            TBLogger('training_logs', name=None, sub_dir='train', version=version),
-            TBLogger('training_logs', name=None, sub_dir='valid', version=version)
+            utils.TBLogger('training_logs', name=None, sub_dir='train', version=version),
+            utils.TBLogger('training_logs', name=None, sub_dir='valid', version=version)
         ]
     )
 
