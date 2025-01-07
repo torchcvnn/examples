@@ -6,3 +6,6 @@ __pycache__/
 data/
 training_logs/
 weights_storage/
+
+# playground jupyter notebooks
+*.ipynb
