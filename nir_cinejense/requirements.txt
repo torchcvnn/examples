@@ -2,3 +2,4 @@ torch
 torchcvnn
 tqdm
 matplotlib
+skimage

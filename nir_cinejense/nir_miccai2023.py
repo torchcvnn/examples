@@ -35,6 +35,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import matplotlib
+from skimage.metrics import peak_signal_noise_ratio, structural_similarity
 
 matplotlib.use("Agg")  # Non interactive backend
 
@@ -343,6 +344,8 @@ def train(rootdir, acc_factor, view, training_cfg):
 
     # Iterate over the slices
     all_psnrs = []
+    all_psnrs_sk = []
+    all_ssim = []
 
     logging.info(f"Processing {n_slices} slices")
     for slice_idx in tqdm.tqdm(range(n_slices)):
@@ -390,7 +393,16 @@ def train(rootdir, acc_factor, view, training_cfg):
             data_range = 1.0
             psnr = 10.0 * np.log10(data_range**2 / mse)
             all_psnrs.append(psnr)
-            logging.debug(f"PSNR for slice {slice_idx}, frame {frame_idx}: {psnr}")
+
+            psnr_sk = peak_signal_noise_ratio(img, pred_img, data_range=1)
+            all_psnrs_sk.append(psnr_sk)
+
+            ssim = structural_similarity(img, pred_img, data_range=1)
+            all_ssim.append(ssim)
+
+            logging.debug(
+                f"For slice {slice_idx}, frame {frame_idx}: PSNR ({psnr}), PSNR (skimage) ({psnr_sk}), SSIM ({ssim})"
+            )
 
             fig, axes = plt.subplots(nrows=1, ncols=3)
             axes[0].imshow(img, cmap="gray", clim=[0, 1])
@@ -415,6 +427,12 @@ def train(rootdir, acc_factor, view, training_cfg):
 
     logging.info(
         f"Mean PSNR evaluated over all the slices and all the frames : {np.mean(all_psnrs)}"
+    )
+    logging.info(
+        f"Mean PSNR (skimage) evaluated over all the slices and all the frames : {np.mean(all_psnrs_sk)}"
+    )
+    logging.info(
+        f"Mean SSIM evaluated over all the slices and all the frames : {np.mean(all_ssim)}"
     )
 
 
