@@ -2,4 +2,4 @@ torch
 torchcvnn
 tqdm
 matplotlib
-skimage
+scikit-image
