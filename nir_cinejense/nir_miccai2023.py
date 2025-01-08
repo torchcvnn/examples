@@ -490,7 +490,9 @@ if __name__ == "__main__":
         type=float,
         help="The weights of the TV loss in the total loss",
     )
-    parser.add_argument("--sample_idx", default=None, help="A sample index to process")
+    parser.add_argument(
+        "--sample_idx", type=int, default=None, help="A sample index to process"
+    )
     parser.add_argument(
         "--results_rootdir",
         default="./results",
