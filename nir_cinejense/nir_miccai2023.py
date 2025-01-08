@@ -438,6 +438,12 @@ def train(rootdir, sample_idx, acc_factor, view, training_cfg, results_rootdir):
         f"Mean SSIM evaluated over all the slices and all the frames : {np.mean(all_ssim)}"
     )
 
+    # Save the metrics into a file
+    with open(results_dir / "metrics.csv", "w") as fh:
+        fh.write(
+            f"{sample_idx},{np.mean(all_psnrs)},{np.mean(all_psnrs_sk)},{np.mean(all_ssim)}"
+        )
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
