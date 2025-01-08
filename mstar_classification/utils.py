@@ -22,8 +22,9 @@
 # SOFTWARE.
 
 # Standard imports
-from typing import Dict, Sequence, Callable, Any
+from typing import Dict, Sequence, Callable, Any, List
 from abc import ABC, abstractmethod
+from argparse import ArgumentParser
 
 # External imports
 import numpy as np
@@ -32,6 +33,23 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.callbacks.progress import TQDMProgressBar
 from lightning.pytorch.callbacks.progress.tqdm_progress import Tqdm
 from lightning.pytorch.utilities import rank_zero_only
+
+
+def train_parser(parser: ArgumentParser) -> ArgumentParser:
+    parser.add_argument('--version', type=int, required=True)
+    parser.add_argument('--logdir', type=str, default='training_logs')
+    parser.add_argument('--weightdir', type=str, default='weights_storage/vit_mstar')
+    parser.add_argument('--datadir', type=str, required=True)
+    
+    parser.add_argument('--patch_size', type=int, default=7)
+    parser.add_argument('--input_size', type=int, default=196)
+    parser.add_argument('--batch_size', type=int, default=32)
+    
+    parser.add_argument('--lr', type=float, default=4e-3)
+    parser.add_argument('--epochs', type=int, default=30)
+
+    return parser
+
 
 
 class TBLogger(TensorBoardLogger):
