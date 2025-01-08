@@ -92,7 +92,6 @@ def combine_coils(kspace):
 
 
 class TVLoss(nn.Module):
-
     def __init__(self):
         super().__init__()
 
@@ -311,7 +310,7 @@ def infer_on_slice(
     return pre_intensity, csm, img
 
 
-def train(rootdir, acc_factor, view, training_cfg):
+def train(rootdir, sample_idx, acc_factor, view, training_cfg, results_rootdir):
     dataset = MICCAI2023(
         rootdir=rootdir,
         view=view,
@@ -319,12 +318,13 @@ def train(rootdir, acc_factor, view, training_cfg):
     )
 
     # Take a random sample
-    sample_idx = random.randint(0, len(dataset) - 1)
-    # sample_idx = 0
+    if sample_idx is None:
+        sample_idx = random.randint(0, len(dataset) - 1)
+        # sample_idx = 0
 
     # Prepare the directory in which to store the results
     patient_path = dataset.patients[sample_idx]
-    results_dir = pathlib.Path("./results") / patient_path.name
+    results_dir = pathlib.Path(results_rootdir) / patient_path.name
 
     # Prepare the results directory, rm if already exists
     if results_dir.exists():
@@ -394,10 +394,13 @@ def train(rootdir, acc_factor, view, training_cfg):
             psnr = 10.0 * np.log10(data_range**2 / mse)
             all_psnrs.append(psnr)
 
-            psnr_sk = peak_signal_noise_ratio(img, pred_img, data_range=1)
+            np_img = img.detach().cpu().numpy()
+            np_pred_img = pred_img.detach().cpu().numpy()
+
+            psnr_sk = peak_signal_noise_ratio(np_img, np_pred_img, data_range=1)
             all_psnrs_sk.append(psnr_sk)
 
-            ssim = structural_similarity(img, pred_img, data_range=1)
+            ssim = structural_similarity(np_img, np_pred_img, data_range=1)
             all_ssim.append(ssim)
 
             logging.debug(
@@ -481,9 +484,22 @@ if __name__ == "__main__":
         type=float,
         help="The weights of the TV loss in the total loss",
     )
+    parser.add_argument("--sample_idx", default=None, help="A sample index to process")
+    parser.add_argument(
+        "--results_rootdir",
+        default="./results",
+        help="The rootdir where to save the results",
+    )
 
     args = parser.parse_args()
 
     training_cfg = {"lr": args.lr, "iter": args.iter, "reg_weight": args.reg_weight}
 
-    train(args.rootdir, args.acc_factor, args.view, training_cfg)
+    train(
+        args.rootdir,
+        args.sample_idx,
+        args.acc_factor,
+        args.view,
+        training_cfg,
+        args.results_rootdir,
+    )
