@@ -22,7 +22,7 @@
 # SOFTWARE.
 
 # Standard imports
-from typing import Dict
+from typing import Dict, Sequence, Callable, Any
 from abc import ABC, abstractmethod
 
 # External imports
@@ -100,8 +100,6 @@ class PadIfNeeded(complexTransform):
         self.min_height = min_height
         self.min_width = min_width
         self.border_mode = border_mode
-        self.always_apply = always_apply
-        self.p = p
         #TODO: other arguments
     
     def __call__(self, image: np.ndarray) -> np.ndarray:
@@ -122,6 +120,15 @@ class PadIfNeeded(complexTransform):
         )
         
         
-# class Compose:
+class Compose(complexTransform):
+    
+    def __init__(self, transforms: Sequence[Callable], always_apply: bool = False, p: float = 0.5) -> None:
+        super().__init__(always_apply, p)
+        self.transforms = transforms
+        
+    def __call__(self, image: np.ndarray) -> np.ndarray:
+        for transform in self.transforms:
+            image = transform(image)
+        return image
     
     
