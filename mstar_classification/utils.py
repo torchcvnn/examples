@@ -28,6 +28,9 @@ from argparse import ArgumentParser
 
 # External imports
 import numpy as np
+
+import torch
+
 from lightning import Trainer, LightningModule
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.callbacks.progress import TQDMProgressBar
@@ -43,7 +46,7 @@ def train_parser(parser: ArgumentParser) -> ArgumentParser:
     
     parser.add_argument('--patch_size', type=int, default=7)
     parser.add_argument('--input_size', type=int, default=196)
-    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--batch_size', type=int, default=64)
     
     parser.add_argument('--lr', type=float, default=4e-3)
     parser.add_argument('--epochs', type=int, default=30)
@@ -148,3 +151,10 @@ class Compose(complexTransform):
         for transform in self.transforms:
             image = transform(image)
         return image
+
+
+class ToTensor:
+    def __call__(self, image: np.ndarray) -> torch.Tensor:
+        # Convert numpy array to PyTorch tensor and Rearrange dimensions from HWC to CHW
+        tensor = torch.from_numpy(image).permute(2, 0, 1).to(torch.complex64)
+        return tensor
