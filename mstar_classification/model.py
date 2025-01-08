@@ -21,11 +21,13 @@
 # SOFTWARE.
 
 # Standard imports
-from typing import Tuple, Union
+from typing import Tuple, Union, List
+from argparse import ArgumentParser
 
 # External imports
 import torch
 import torch.nn as nn
+from torch import Tensor
 
 import lightning as L
 
@@ -34,7 +36,6 @@ from torchmetrics.classification import Accuracy
 import torchcvnn.nn as c_nn
 
 # Local imports
-import utils
 
 class PatchEmbedder(nn.Module):
 
@@ -115,7 +116,6 @@ class PatchEmbedder(nn.Module):
 
     def forward(self, x):
         patch_embeddings = self.embedder(x)  # (B, embed_dim, num_patch_H, num_patch_W)
-        patch_embeddings = torch.fft.fft2(patch_embeddings)
 
         num_patches_H, num_patches_W = patch_embeddings.shape[2:]
 
@@ -128,7 +128,7 @@ class PatchEmbedder(nn.Module):
 
 class Model(nn.Module):
 
-    def __init__(self, patch_size: int = 7):
+    def __init__(self, opt: ArgumentParser, num_classes: int = 10):
         super().__init__()
 
         # The hidden_dim must be adapted to the hidden_dim of the ViT model
@@ -138,10 +138,10 @@ class Model(nn.Module):
         dropout = 0.1
         attention_dropout = 0.1
         # norm_layer = PseudoNorm
-        norm_layer = nn.RMSNorm
-        # norm_layer = nn.LayerNorm
+        norm_layer = c_nn.RMSNorm
+        # norm_layer = c_nn.LayerNorm
 
-        embedder = PatchEmbedder(28, 1, hidden_dim, patch_size, norm_layer=norm_layer, dtype=torch.float32)
+        embedder = PatchEmbedder(opt.input_size, 1, hidden_dim, opt.patch_size, norm_layer=norm_layer)
 
         # For using an off-the shelf ViT model, you can use the following code
         # If you go this way, do not forget to adapt the hidden_dim above
@@ -169,10 +169,11 @@ class Model(nn.Module):
 
         # A Linear decoding head to project on the logits
         self.head = nn.Sequential(
-            nn.Linear(hidden_dim, 10, dtype=torch.complex64), c_nn.Mod()
+            nn.Linear(hidden_dim, num_classes, dtype=torch.complex64), 
+            c_nn.Mod()
         )
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         features = self.backbone(x)  # B, num_patches, hidden_dim
 
         # Global average pooling of the patches encoding
@@ -183,23 +184,24 @@ class Model(nn.Module):
 
 class ViTMSTARModel(L.LightningModule):
 
-    def __init__(self, num_classes: int = 10):
+    def __init__(self, opt: ArgumentParser, num_classes: int = 10):
         super().__init__()
 
+        self.opt = opt
         self.ce_loss = nn.CrossEntropyLoss()
-        self.model = Model()
+        self.model = Model(opt, num_classes)
         self.accuracy = Accuracy(task='multiclass', num_classes=num_classes)
         
         self.train_step_outputs = {}
         self.valid_step_outputs = {}
     
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
 
-    def configure_optimizers(self):
-        return torch.optim.Adam(params=self.parameters(), lr=3e-4)
+    def configure_optimizers(self) -> torch.optim.Optimizer:
+        return torch.optim.Adam(params=self.parameters(), lr=self.opt.lr)
     
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
         data, label = batch
         logits = self(data)
 
@@ -220,7 +222,7 @@ class ViTMSTARModel(L.LightningModule):
 
         return loss
 
-    def validation_step(self, batch: torch.Tensor, batch_idx: int):
+    def validation_step(self, batch: List[Tensor], batch_idx: int):
         images, labels = batch
         logits = self(images)
 
