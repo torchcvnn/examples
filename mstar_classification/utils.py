@@ -130,5 +130,3 @@ class Compose(complexTransform):
         for transform in self.transforms:
             image = transform(image)
         return image
-    
-    
