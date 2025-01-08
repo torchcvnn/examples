@@ -23,8 +23,10 @@
 
 # Standard imports
 from typing import Dict
+from abc import ABC, abstractmethod
 
 # External imports
+import numpy as np
 from lightning import Trainer, LightningModule
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.callbacks.progress import TQDMProgressBar
@@ -57,3 +59,69 @@ class CustomProgressBar(TQDMProgressBar):
         bar = super().init_validation_tqdm()
         bar.ascii = ' >'
         return bar
+    
+
+class complexTransform(ABC):
+    
+    def __init__(self, always_apply: bool = False, p: float = 0.5) -> None:
+        self.always_apply = always_apply
+        self.p = p
+    
+    @abstractmethod
+    def __call__(self, image: np.ndarray) -> np.ndarray:
+        raise NotImplementedError
+    
+
+class ApplyFFT2(complexTransform):
+    
+    def __init__(self, always_apply: bool = False, p: float = 0.5) -> None:
+        super().__init__(always_apply, p)
+
+    def __call__(self, image: np.ndarray) -> np.ndarray:
+        # Apply 2D FFT to the image
+        return np.fft.fftshift(np.fft.fft2(image, axes=(0, 1)), axes=(0, 1))
+    
+    
+class ApplyIFFT2(complexTransform):
+    
+    def __init__(self, always_apply: bool = False, p: float = 0.5) -> None:
+        super().__init__(always_apply, p)
+
+    def __call__(self, image: np.ndarray) -> np.ndarray:
+        # Apply 2D IFFT to the image
+        return np.fft.ifft2(np.fft.ifftshift(image, axes=(0, 1)), axes=(0, 1))
+
+
+class PadIfNeeded(complexTransform):
+    
+    def __init__(self, min_height: int, min_width: int, border_mode: str = 'constant', always_apply: bool = False, p: float = 0.5) -> None:
+        super().__init__(always_apply, p)
+        
+        self.min_height = min_height
+        self.min_width = min_width
+        self.border_mode = border_mode
+        self.always_apply = always_apply
+        self.p = p
+        #TODO: other arguments
+    
+    def __call__(self, image: np.ndarray) -> np.ndarray:
+        # Pad the image if it is smaller than the desired size
+        image_shapes = image.shape
+        pad_top = (self.min_height - image_shapes[0]) // 2
+        pad_bottom = self.min_height - image_shapes[0] - pad_top
+        pad_left = (self.min_width - image_shapes[1]) // 2
+        pad_right = self.min_width - image_shapes[1] - pad_left
+        
+        paddings = ((pad_top, pad_bottom), (pad_left, pad_right))
+        if len(image_shapes) == 3:
+            paddings += ((0, 0),)
+        return np.pad(
+            image,
+            paddings,
+            mode=self.border_mode
+        )
+        
+        
+# class Compose:
+    
+    
