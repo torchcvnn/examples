@@ -50,13 +50,30 @@ def lightning_train(opt: ArgumentParser):
             ToTensor()
         ])
     )
+    valid_dataset = MSTARTargets(
+        opt.datadir,
+        transform=Compose([
+            ApplyFFT2(),
+            PadIfNeeded(opt.input_size, opt.input_size),
+            ApplyIFFT2(),
+            ToTensor()
+        ])
+    )
 
     # Train dataloader
     train_loader = DataLoader(
         train_dataset, 
         batch_size=opt.batch_size, 
         shuffle=True,
-        num_workers=8,
+        num_workers=4,
+        persistent_workers=True,
+        pin_memory=True
+    )
+    valid_loader = DataLoader(
+        valid_dataset, 
+        batch_size=opt.batch_size, 
+        shuffle=True,
+        num_workers=4,
         persistent_workers=True,
         pin_memory=True
     )
@@ -66,22 +83,22 @@ def lightning_train(opt: ArgumentParser):
         max_epochs=opt.epochs,
         num_sanity_val_steps=0,
         benchmark=True,
-        enable_checkpointing=False,
+        enable_checkpointing=True,
         callbacks=[
             CustomProgressBar(),
-            # EarlyStopping(
-            #     monitor='val_loss', 
-            #     verbose=True,
-            #     patience=5,
-            #     min_delta=0.005
-            # ),
+            EarlyStopping(
+                monitor='val_loss', 
+                verbose=True,
+                patience=10,
+                min_delta=0.005
+            ),
             LearningRateMonitor(logging_interval='epoch'),
-            # ModelCheckpoint(
-            #     dirpath=opt.weightdir,
-            #     monitor='val_Accuracy', 
-            #     verbose=True, 
-            #     mode='max'
-            # )
+            ModelCheckpoint(
+                dirpath=opt.weightdir,
+                monitor='val_Accuracy', 
+                verbose=True, 
+                mode='max'
+            )
         ],
         logger=[
             TBLogger(opt.logdir, name=None, sub_dir='train', version=opt.version),
@@ -89,7 +106,7 @@ def lightning_train(opt: ArgumentParser):
         ]
     )
 
-    trainer.fit(model, train_dataloaders=train_loader)
+    trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
     
     
 if __name__ == '__main__':
