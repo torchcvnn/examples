@@ -222,12 +222,12 @@ class ViTMSTARModel(L.LightningModule):
 
         return loss
 
-    def validation_step(self, batch: List[Tensor], batch_idx: int):
-        images, labels = batch
-        logits = self(images)
+    def validation_step(self, batch: List[Tensor], batch_idx: int) -> None:
+        data, label = batch
+        logits = self(data)
 
-        loss = self.ce_loss(logits, labels)
-        acc = self.accuracy(logits, labels)
+        loss = self.ce_loss(logits, label)
+        acc = self.accuracy(logits, label)
         self.log('step_loss', loss, prog_bar=True, sync_dist=True)
         self.log('step_metrics', acc, prog_bar=True, sync_dist=True)
         
