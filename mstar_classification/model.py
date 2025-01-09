@@ -156,7 +156,7 @@ class Model(nn.Module):
         self.backbone = c_nn.ViT(
             embedder,
             opt.num_layers,
-            opt.heads,
+            opt.num_heads,
             opt.hidden_dim,
             mlp_dim,
             dropout=opt.dropout,
