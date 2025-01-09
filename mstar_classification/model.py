@@ -128,20 +128,19 @@ class PatchEmbedder(nn.Module):
 
 class Model(nn.Module):
 
+    _norm_layer = {
+        'layer_norm': c_nn.LayerNorm,
+        'rms_norm': c_nn.RMSNorm,
+    }
+
     def __init__(self, opt: ArgumentParser, num_classes: int = 10):
         super().__init__()
 
         # The hidden_dim must be adapted to the hidden_dim of the ViT model
         # It is used as the output dimension of the patch embedder but must match
         # the expected hidden dim of your ViT
-        hidden_dim = 32
-        dropout = 0.1
-        attention_dropout = 0.1
-        # norm_layer = PseudoNorm
-        norm_layer = c_nn.RMSNorm
-        # norm_layer = c_nn.LayerNorm
 
-        embedder = PatchEmbedder(opt.input_size, 1, hidden_dim, opt.patch_size, norm_layer=norm_layer)
+        embedder = PatchEmbedder(opt.input_size, 1, opt.hidden_dim, opt.patch_size, norm_layer=self._norm_layer[opt.norm_layer])
 
         # For using an off-the shelf ViT model, you can use the following code
         # If you go this way, do not forget to adapt the hidden_dim above
@@ -152,24 +151,22 @@ class Model(nn.Module):
         # If you go this way, do not forget to adapt the hidden_dim above
         # You can reduce it to 32 for example
 
-        num_layers = 3
-        num_heads = 8
-        mlp_dim = 4 * hidden_dim
+        mlp_dim = 4 * opt.hidden_dim
 
         self.backbone = c_nn.ViT(
             embedder,
-            num_layers,
-            num_heads,
-            hidden_dim,
+            opt.num_layers,
+            opt.heads,
+            opt.hidden_dim,
             mlp_dim,
-            dropout=dropout,
-            attention_dropout=attention_dropout,
+            dropout=opt.dropout,
+            attention_dropout=opt.attention_dropout,
             norm_layer=c_nn.RMSNorm,
         )
 
         # A Linear decoding head to project on the logits
         self.head = nn.Sequential(
-            nn.Linear(hidden_dim, num_classes, dtype=torch.complex64), 
+            nn.Linear(opt.hidden_dim, num_classes, dtype=torch.complex64), 
             c_nn.Mod()
         )
 
