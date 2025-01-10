@@ -22,7 +22,7 @@
 # SOFTWARE.
 
 # Standard imports
-from typing import Dict, Sequence, Callable, Any, List
+from typing import Dict, Sequence, Callable
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser
 
@@ -30,6 +30,7 @@ from argparse import ArgumentParser
 import numpy as np
 
 import torch
+from torch.utils.data import DataLoader, Dataset
 
 from lightning import Trainer, LightningModule
 from lightning.pytorch.loggers import TensorBoardLogger
@@ -61,6 +62,27 @@ def train_parser(parser: ArgumentParser) -> ArgumentParser:
 
     return parser
 
+
+def get_dataloaders(opt: ArgumentParser, train_dataset: Dataset, valid_dataset: Dataset) -> None:
+    # Train dataloader
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=opt.batch_size, 
+        shuffle=True,
+        num_workers=4,
+        persistent_workers=True,
+        pin_memory=True
+    )
+    # Validation dataloader
+    valid_loader = DataLoader(
+        valid_dataset, 
+        batch_size=opt.batch_size, 
+        shuffle=True,
+        num_workers=4,
+        persistent_workers=True,
+        pin_memory=True
+    )
+    return train_loader, valid_loader
 
 
 class TBLogger(TensorBoardLogger):

@@ -179,7 +179,7 @@ class Model(nn.Module):
         return self.head(mean_features)
     
 
-class ViTMSTARModel(L.LightningModule):
+class BaseViTModule(L.LightningModule):
 
     def __init__(self, opt: ArgumentParser, num_classes: int = 10):
         super().__init__()
@@ -198,8 +198,7 @@ class ViTMSTARModel(L.LightningModule):
     def configure_optimizers(self) -> torch.optim.Optimizer:
         return torch.optim.Adam(params=self.parameters(), lr=self.opt.lr)
     
-    def training_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
-        data, label = batch
+    def _training_step(self, data: Tensor, label: Tensor) -> Tensor:
         logits = self(data)
 
         loss = self.ce_loss(logits, label)
@@ -219,8 +218,7 @@ class ViTMSTARModel(L.LightningModule):
 
         return loss
 
-    def validation_step(self, batch: List[Tensor], batch_idx: int) -> None:
-        data, label = batch
+    def _validation_step(self, data: Tensor, label: Tensor) -> None:
         logits = self(data)
 
         loss = self.ce_loss(logits, label)
@@ -260,3 +258,25 @@ class ViTMSTARModel(L.LightningModule):
         self.log('val_loss', mean_loss_value, sync_dist=True)
         self.log('val_Accuracy', mean_metrics_value, sync_dist=True)
         self.valid_step_outputs.clear()
+
+
+class ViTMSTARModule(BaseViTModule):
+    
+    def training_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
+        data, label = batch
+        return super()._training_step(data, label)
+
+    def validation_step(self, batch: List[Tensor], batch_idx: int) -> None:
+        data, label = batch
+        super()._validation_step(data, label)
+
+
+class ViTSAMPLEModule(BaseViTModule):
+
+    def training_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
+        data, label, _ = batch
+        return super()._training_step(data, label)
+
+    def validation_step(self, batch: List[Tensor], batch_idx: int) -> None:
+        data, label, _ = batch
+        super()._validation_step(data, label)

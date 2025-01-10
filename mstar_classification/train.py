@@ -25,21 +25,18 @@ from argparse import ArgumentParser
 
 # External imports
 import torch
-from torch.utils.data import DataLoader
 
-from torchcvnn.datasets import MSTARTargets
+from torchcvnn.datasets import MSTARTargets, SAMPLE
 
 from lightning import Trainer
 from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
 
 # Local imports
-from model import ViTMSTARModel
-from utils import CustomProgressBar, TBLogger, PadIfNeeded, ApplyFFT2, ApplyIFFT2, Compose, train_parser, ToTensor
+from model import ViTMSTARModule, ViTSAMPLEModule
+from utils import CustomProgressBar, TBLogger, PadIfNeeded, ApplyFFT2, ApplyIFFT2, Compose, train_parser, ToTensor, get_dataloaders
 
         
-def lightning_train(opt: ArgumentParser):
-    torch.set_float32_matmul_precision('high')
-
+def lightning_train_MSTAR(opt: ArgumentParser, trainer: Trainer):
     # Dataloading
     train_dataset = MSTARTargets(
         opt.datadir,
@@ -48,6 +45,7 @@ def lightning_train(opt: ArgumentParser):
             PadIfNeeded(opt.input_size, opt.input_size),
             ApplyIFFT2(),
             ToTensor()
+            # TODO: LogTransform
         ])
     )
     valid_dataset = MSTARTargets(
@@ -59,26 +57,36 @@ def lightning_train(opt: ArgumentParser):
             ToTensor()
         ])
     )
+    train_loader, valid_loader = get_dataloaders(opt, train_dataset, valid_dataset)
+    model = ViTMSTARModule(opt, num_classes=len(train_dataset.class_names))
+    trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
 
-    # Train dataloader
-    train_loader = DataLoader(
-        train_dataset, 
-        batch_size=opt.batch_size, 
-        shuffle=True,
-        num_workers=4,
-        persistent_workers=True,
-        pin_memory=True
-    )
-    valid_loader = DataLoader(
-        valid_dataset, 
-        batch_size=opt.batch_size, 
-        shuffle=True,
-        num_workers=4,
-        persistent_workers=True,
-        pin_memory=True
-    )
 
-    model = ViTMSTARModel(opt, num_classes=len(train_dataset.class_names))
+def lightning_train_SAMPLE(opt: ArgumentParser, trainer: Trainer):
+    # Dataloading
+    train_dataset = SAMPLE(
+        opt.datadir,
+        transform=Compose([
+            ToTensor()
+            # TODO: LogTransform
+        ])
+    )
+    valid_dataset = SAMPLE(
+        opt.datadir,
+        transform=Compose([
+            ToTensor()
+        ])
+    )
+    train_loader, valid_loader = get_dataloaders(opt, train_dataset, valid_dataset)
+    model = ViTSAMPLEModule(opt, num_classes=len(train_dataset.class_names))
+    trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
+    
+    
+if __name__ == '__main__':
+    parser = ArgumentParser()
+    parser = train_parser(parser)
+    opt = parser.parse_args()
+
     trainer = Trainer(
         max_epochs=opt.epochs,
         num_sanity_val_steps=0,
@@ -89,7 +97,7 @@ def lightning_train(opt: ArgumentParser):
             EarlyStopping(
                 monitor='val_loss', 
                 verbose=True,
-                patience=10,
+                patience=opt.patience,
                 min_delta=0.005
             ),
             LearningRateMonitor(logging_interval='epoch'),
@@ -105,13 +113,6 @@ def lightning_train(opt: ArgumentParser):
             TBLogger(opt.logdir, name=None, sub_dir='valid', version=opt.version)
         ]
     )
-
-    trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
     
-    
-if __name__ == '__main__':
-    parser = ArgumentParser()
-    parser = train_parser(parser)
-    opt = parser.parse_args()
-    
-    lightning_train(opt)
+    torch.set_float32_matmul_precision('high')
+    lightning_train_MSTAR(opt, trainer)
