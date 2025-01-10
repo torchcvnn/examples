@@ -1,7 +1,7 @@
 # coding: utf-8
 # MIT License
 
-# Copyright (c) 2023 Jeremy Fix
+# Copyright (c) 2024-2025 Jeremy Fix, Xuan-Huy Nguyen
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,12 +23,19 @@
 
 # Standard imports
 import os
-from typing import Tuple
+from typing import Tuple, Dict
 
 # External imports
 import torch
 import torch.nn as nn
 import tqdm
+
+from lightning import Trainer, LightningModule
+from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.callbacks.progress import TQDMProgressBar
+from lightning.pytorch.callbacks.progress.tqdm_progress import Tqdm
+from lightning.pytorch.utilities import rank_zero_only
 
 # import torch.onnx
 
@@ -236,3 +243,30 @@ def generate_unique_logpath(logdir: str, raw_run_name: str) -> str:
             os.makedirs(log_path)
             return log_path
         i = i + 1
+
+
+class TBLogger(TensorBoardLogger):
+    @rank_zero_only
+    def log_metrics(self, metrics: Dict[str, float | int], step: int) -> None:
+        metrics.pop('epoch', None)
+        metrics = {k: v for k, v in metrics.items() if ('step' not in k) and ('val' not in k)}
+        super().log_metrics(metrics, step)
+    
+    
+class CustomProgressBar(TQDMProgressBar):
+    
+    def get_metrics(self, trainer: Trainer, model: LightningModule) -> Dict[str, float]:
+        items = super().get_metrics(trainer, model)
+        items.pop("v_num", None)
+        return items
+    
+    def init_train_tqdm(self) -> Tqdm:
+        """Override this to customize the tqdm bar for training."""
+        bar = super().init_train_tqdm()
+        bar.ascii = ' >'
+        return bar
+    
+    def init_validation_tqdm(self) -> Tqdm:
+        bar = super().init_validation_tqdm()
+        bar.ascii = ' >'
+        return bar
