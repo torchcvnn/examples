@@ -28,14 +28,18 @@ from argparse import ArgumentParser
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.optim.lr_scheduler import MultiStepLR
+
+from torchvision.models import resnet18, vgg11
 
 import lightning as L
 
-from torchmetrics.classification import Accuracy
+from torchmetrics.classification import Accuracy, ConfusionMatrix
 
 import torchcvnn.nn as c_nn
 
 # Local imports
+
 
 class PatchEmbedder(nn.Module):
 
@@ -161,7 +165,7 @@ class Model(nn.Module):
             mlp_dim,
             dropout=opt.dropout,
             attention_dropout=opt.attention_dropout,
-            norm_layer=c_nn.RMSNorm,
+            norm_layer=c_nn.LayerNorm,
         )
 
         # A Linear decoding head to project on the logits
@@ -179,24 +183,31 @@ class Model(nn.Module):
         return self.head(mean_features)
     
 
-class BaseViTModule(L.LightningModule):
+class BaseResNetModule(L.LightningModule):
 
     def __init__(self, opt: ArgumentParser, num_classes: int = 10):
         super().__init__()
 
         self.opt = opt
         self.ce_loss = nn.CrossEntropyLoss()
-        self.model = Model(opt, num_classes)
+        self.num_classes = num_classes
+        self.model = resnet18(num_classes=num_classes)
         self.accuracy = Accuracy(task='multiclass', num_classes=num_classes)
+        self.confusion_matrix = ConfusionMatrix(task='multiclass', num_classes=num_classes)
         
         self.train_step_outputs = {}
         self.valid_step_outputs = {}
+        self.test_step_outputs = {}
     
     def forward(self, x: Tensor) -> Tensor:
-        return self.model(x)
+        return self.model(x.repeat(1, 3, 1, 1))
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
-        return torch.optim.Adam(params=self.parameters(), lr=self.opt.lr)
+        optimizer = torch.optim.Adam(params=self.parameters(), lr=self.opt.lr)
+        return {
+            'optimizer': optimizer,
+            # 'lr_scheduler': MultiStepLR(optimizer, milestones=[5, ], gamma=0.001)
+        }
     
     def _training_step(self, data: Tensor, label: Tensor) -> Tensor:
         logits = self(data)
@@ -234,6 +245,10 @@ class BaseViTModule(L.LightningModule):
         else:
             self.valid_step_outputs['step_loss'].append(loss)
             self.valid_step_outputs['step_metrics'].append(acc)
+            
+    def _predict_step(self, data: Tensor, label: Tensor) -> Tuple[Tensor]:
+        logits = self(data)
+        return self.accuracy(logits, label), self.confusion_matrix(logits, label)
 
     def on_train_epoch_end(self) -> None:
         _log_dict = {
@@ -260,7 +275,7 @@ class BaseViTModule(L.LightningModule):
         self.valid_step_outputs.clear()
 
 
-class ViTMSTARModule(BaseViTModule):
+class ResNetMSTARModule(BaseResNetModule):
     
     def training_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
         data, label = batch
@@ -269,9 +284,13 @@ class ViTMSTARModule(BaseViTModule):
     def validation_step(self, batch: List[Tensor], batch_idx: int) -> None:
         data, label = batch
         super()._validation_step(data, label)
+        
+    def predict_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
+        data, label = batch
+        return super()._predict_step(data, label)
 
 
-class ViTSAMPLEModule(BaseViTModule):
+class ResNetSAMPLEModule(BaseResNetModule):
 
     def training_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
         data, label, _ = batch
@@ -280,3 +299,7 @@ class ViTSAMPLEModule(BaseViTModule):
     def validation_step(self, batch: List[Tensor], batch_idx: int) -> None:
         data, label, _ = batch
         super()._validation_step(data, label)
+        
+    def predict_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
+        data, label, _ = batch
+        return super()._predict_step(data, label)

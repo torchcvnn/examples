@@ -21,10 +21,13 @@
 # SOFTWARE.
 
 # Standard imports
+import random
 from argparse import ArgumentParser
 
 # External imports
 import torch
+
+import torchvision.transforms.v2 as v2
 
 from torchcvnn.datasets import MSTARTargets, SAMPLE
 
@@ -32,53 +35,49 @@ from lightning import Trainer
 from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
 
 # Local imports
-from model import ViTMSTARModule, ViTSAMPLEModule
-from utils import CustomProgressBar, TBLogger, PadIfNeeded, ApplyFFT2, ApplyIFFT2, Compose, train_parser, ToTensor, get_dataloaders
-
+from model import ResNetMSTARModule, ResNetSAMPLEModule
+from utils import (
+    CustomProgressBar, 
+    TBLogger,
+    train_parser, 
+    get_dataloaders,
+    get_datasets,
+    ToMagnitude
+)
         
 def lightning_train_MSTAR(opt: ArgumentParser, trainer: Trainer):
     # Dataloading
-    train_dataset = MSTARTargets(
+    dataset = MSTARTargets(
         opt.datadir,
-        transform=Compose([
-            ApplyFFT2(),
-            PadIfNeeded(opt.input_size, opt.input_size),
-            ApplyIFFT2(),
-            ToTensor()
-            # TODO: LogTransform
+        transform=v2.Compose([
+            ToMagnitude(),
+            v2.ToImage(),
+            v2.Resize(opt.input_size),
+            v2.CenterCrop(opt.input_size),
+            v2.ToDtype(torch.float32)
         ])
     )
-    valid_dataset = MSTARTargets(
-        opt.datadir,
-        transform=Compose([
-            ApplyFFT2(),
-            PadIfNeeded(opt.input_size, opt.input_size),
-            ApplyIFFT2(),
-            ToTensor()
-        ])
-    )
+    train_dataset, valid_dataset = get_datasets(dataset)
     train_loader, valid_loader = get_dataloaders(opt, train_dataset, valid_dataset)
-    model = ViTMSTARModule(opt, num_classes=len(train_dataset.class_names))
+    model = ResNetMSTARModule(opt, num_classes=len(dataset.class_names))
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
-
+    # predictions = trainer.predict(dataloaders=valid_loader)
+    # print(predictions)
 
 def lightning_train_SAMPLE(opt: ArgumentParser, trainer: Trainer):
     # Dataloading
-    train_dataset = SAMPLE(
+    dataset = SAMPLE(
         opt.datadir,
-        transform=Compose([
-            ToTensor()
-            # TODO: LogTransform
-        ])
+        transform=v2.Compose([
+            ToMagnitude(),
+            v2.ToImage(),
+            v2.Resize(opt.input_size),
+            v2.CenterCrop(opt.input_size),
+            v2.ToDtype(torch.float32)])
     )
-    valid_dataset = SAMPLE(
-        opt.datadir,
-        transform=Compose([
-            ToTensor()
-        ])
-    )
+    train_dataset, valid_dataset = get_datasets(dataset)
     train_loader, valid_loader = get_dataloaders(opt, train_dataset, valid_dataset)
-    model = ViTSAMPLEModule(opt, num_classes=len(train_dataset.class_names))
+    model = ResNetSAMPLEModule(opt, num_classes=len(dataset.class_names))
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
     
     
@@ -98,7 +97,7 @@ if __name__ == '__main__':
                 monitor='val_loss', 
                 verbose=True,
                 patience=opt.patience,
-                min_delta=0.005
+                min_delta=0.0001
             ),
             LearningRateMonitor(logging_interval='epoch'),
             ModelCheckpoint(
@@ -115,4 +114,4 @@ if __name__ == '__main__':
     )
     
     torch.set_float32_matmul_precision('high')
-    lightning_train_MSTAR(opt, trainer)
+    lightning_train_SAMPLE(opt, trainer)

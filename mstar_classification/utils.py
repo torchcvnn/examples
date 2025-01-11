@@ -22,7 +22,8 @@
 # SOFTWARE.
 
 # Standard imports
-from typing import Dict, Sequence, Callable
+import random
+from typing import Dict, Sequence, Callable, Tuple
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser
 
@@ -46,7 +47,7 @@ def train_parser(parser: ArgumentParser) -> ArgumentParser:
     parser.add_argument('--datadir', type=str, required=True)
     
     parser.add_argument('--patch_size', type=int, default=7)
-    parser.add_argument('--input_size', type=int, default=196)
+    parser.add_argument('--input_size', type=int, default=54)
     parser.add_argument('--batch_size', type=int, default=64)
     
     parser.add_argument('--lr', type=float, default=4e-3)
@@ -63,7 +64,19 @@ def train_parser(parser: ArgumentParser) -> ArgumentParser:
     return parser
 
 
-def get_dataloaders(opt: ArgumentParser, train_dataset: Dataset, valid_dataset: Dataset) -> None:
+def get_datasets(dataset: Dataset) -> Tuple[Dataset]:
+    indices = list(range(len(dataset)))
+    random.shuffle(indices)
+    num_valid = int(0.2 * len(dataset))
+    train_indices = indices[num_valid:]
+    valid_indices = indices[:num_valid]
+    train_dataset = torch.utils.data.Subset(dataset, train_indices)
+    valid_dataset = torch.utils.data.Subset(dataset, valid_indices)
+    
+    return train_dataset, valid_dataset
+
+
+def get_dataloaders(opt: ArgumentParser, train_dataset: Dataset, valid_dataset: Dataset) -> Tuple[DataLoader]:
     # Train dataloader
     train_loader = DataLoader(
         train_dataset, 
@@ -107,6 +120,11 @@ class CustomProgressBar(TQDMProgressBar):
         return bar
     
     def init_validation_tqdm(self) -> Tqdm:
+        bar = super().init_validation_tqdm()
+        bar.ascii = ' >'
+        return bar
+    
+    def init_predict_tqdm(self):
         bar = super().init_validation_tqdm()
         bar.ascii = ' >'
         return bar
@@ -181,6 +199,12 @@ class Compose(complexTransform):
         for transform in self.transforms:
             image = transform(image)
         return image
+    
+    
+class ToMagnitude(torch.nn.Module):
+    
+    def forward(self, image: np.ndarray) -> np.ndarray:
+        return np.abs(image)
 
 
 class ToTensor:
