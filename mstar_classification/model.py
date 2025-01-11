@@ -30,6 +30,7 @@ import torch.nn as nn
 from torch import Tensor
 from torch.optim.lr_scheduler import MultiStepLR
 
+from torchvision.utils import make_grid
 from torchvision.models import resnet18, vgg11
 
 import lightning as L
@@ -37,6 +38,8 @@ import lightning as L
 from torchmetrics.classification import Accuracy, ConfusionMatrix
 
 import torchcvnn.nn as c_nn
+
+from monai.visualize import GradCAM
 
 # Local imports
 
@@ -190,8 +193,8 @@ class BaseResNetModule(L.LightningModule):
 
         self.opt = opt
         self.ce_loss = nn.CrossEntropyLoss()
-        self.num_classes = num_classes
         self.model = resnet18(num_classes=num_classes)
+        self.gradcam = GradCAM(self.model, 'layer3')
         self.accuracy = Accuracy(task='multiclass', num_classes=num_classes)
         self.confusion_matrix = ConfusionMatrix(task='multiclass', num_classes=num_classes)
         
@@ -208,8 +211,15 @@ class BaseResNetModule(L.LightningModule):
             'optimizer': optimizer,
             # 'lr_scheduler': MultiStepLR(optimizer, milestones=[5, ], gamma=0.001)
         }
+        
+    def plot_gradcam(self, data: Tensor, logger_id: int) -> None:
+        assert logger_id < len(self.loggers), 'Invalid logger id'
+        gradient_cam = self.gradcam(data.repeat(1, 3, 1, 1))
+        grid = make_grid(gradient_cam * 0.5 + data * 0.5) #, make_grid(data)
+        self.loggers[logger_id].experiment.add_image('gradcam', grid, self.current_epoch)
+        # self.loggers[logger_id].experiment.add_image('images', grid[1], self.current_epoch)
     
-    def _training_step(self, data: Tensor, label: Tensor) -> Tensor:
+    def _training_step(self, data: Tensor, label: Tensor, batch_idx: int) -> Tensor:
         logits = self(data)
 
         loss = self.ce_loss(logits, label)
@@ -226,6 +236,9 @@ class BaseResNetModule(L.LightningModule):
         else:
             self.train_step_outputs['step_loss'].append(loss)
             self.train_step_outputs['step_metrics'].append(acc)
+            
+        if batch_idx == len(self.trainer.train_dataloader) - 1:
+            self.plot_gradcam(data, 0)
 
         return loss
 
@@ -294,7 +307,7 @@ class ResNetSAMPLEModule(BaseResNetModule):
 
     def training_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
         data, label, _ = batch
-        return super()._training_step(data, label)
+        return super()._training_step(data, label, batch_idx)
 
     def validation_step(self, batch: List[Tensor], batch_idx: int) -> None:
         data, label, _ = batch
