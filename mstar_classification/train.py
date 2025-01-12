@@ -21,7 +21,6 @@
 # SOFTWARE.
 
 # Standard imports
-import random
 from argparse import ArgumentParser
 
 # External imports
@@ -37,48 +36,63 @@ from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, Mode
 # Local imports
 from model import ResNetMSTARModule, ResNetSAMPLEModule
 from utils import (
-    CustomProgressBar, 
+    CustomProgressBar,
     TBLogger,
-    train_parser, 
+    train_parser,
     get_dataloaders,
     get_datasets,
-    ToMagnitude
+    ApplyFFT2,
+    ApplyIFFT2,
+    ToTensor,
+    CenterCrop,
+    LogTransform,
+    MinMaxNormalize
 )
-        
-def lightning_train_MSTAR(opt: ArgumentParser, trainer: Trainer):
+
+def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Trainer):
     # Dataloading
     dataset = MSTARTargets(
         opt.datadir,
-        transform=v2.Compose([
-            ToMagnitude(),
-            v2.ToImage(),
-            v2.Resize(opt.input_size),
-            v2.CenterCrop(opt.input_size),
-            v2.ToDtype(torch.float32)
-        ])
+        transform=v2.Compose(
+            [
+                ApplyFFT2(),
+                CenterCrop(opt.input_size, opt.input_size),
+                ApplyIFFT2(),
+                LogTransform(2e-2, 40),
+                ToTensor(),
+            ]
+        ),
     )
     train_dataset, valid_dataset = get_datasets(dataset)
     train_loader, valid_loader = get_dataloaders(opt, train_dataset, valid_dataset)
     model = ResNetMSTARModule(opt, num_classes=len(dataset.class_names))
+
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
     # predictions = trainer.predict(dataloaders=valid_loader)
     # print(predictions)
+    
 
-def lightning_train_SAMPLE(opt: ArgumentParser, trainer: Trainer):
+def lightning_train_cplxSAMPLE(opt: ArgumentParser, trainer: Trainer):
     # Dataloading
     dataset = SAMPLE(
         opt.datadir,
-        transform=v2.Compose([
-            ToMagnitude(),
-            v2.ToImage(),
-            v2.Resize(opt.input_size),
-            v2.CenterCrop(opt.input_size),
-            v2.ToDtype(torch.float32)])
+        transform=v2.Compose(
+            [
+                ApplyFFT2(),
+                CenterCrop(opt.input_size, opt.input_size),
+                ApplyIFFT2(),
+                LogTransform(2e-2, 40),
+                ToTensor(),
+            ]
+        ),
     )
     train_dataset, valid_dataset = get_datasets(dataset)
     train_loader, valid_loader = get_dataloaders(opt, train_dataset, valid_dataset)
     model = ResNetSAMPLEModule(opt, num_classes=len(dataset.class_names))
+
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
+    predictions = trainer.predict(dataloaders=valid_loader)
+    print(predictions)
     
     
 if __name__ == '__main__':
@@ -114,4 +128,4 @@ if __name__ == '__main__':
     )
     
     torch.set_float32_matmul_precision('high')
-    lightning_train_SAMPLE(opt, trainer)
+    lightning_train_cplxMSTAR(opt, trainer)

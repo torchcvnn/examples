@@ -28,10 +28,10 @@ from argparse import ArgumentParser
 import torch
 import torch.nn as nn
 from torch import Tensor
-from torch.optim.lr_scheduler import MultiStepLR
+from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
 
 from torchvision.utils import make_grid
-from torchvision.models import resnet18, vgg11
+from torchvision.models import resnet18, resnet34, resnet50
 
 import lightning as L
 
@@ -193,7 +193,8 @@ class BaseResNetModule(L.LightningModule):
 
         self.opt = opt
         self.ce_loss = nn.CrossEntropyLoss()
-        self.model = resnet18(num_classes=num_classes)
+        self.num_classes = num_classes
+        self.model = self.configure_model()
         self.gradcam = GradCAM(self.model, 'layer3')
         self.accuracy = Accuracy(task='multiclass', num_classes=num_classes)
         self.confusion_matrix = ConfusionMatrix(task='multiclass', num_classes=num_classes)
@@ -201,16 +202,40 @@ class BaseResNetModule(L.LightningModule):
         self.train_step_outputs = {}
         self.valid_step_outputs = {}
         self.test_step_outputs = {}
+                
+    def configure_model(self):
+        model = resnet18(num_classes=self.num_classes)
+        model = convert_to_complex(model)
+        model = nn.Sequential(
+            model,
+            c_nn.Mod(),
+        )
+        with torch.no_grad():
+            model.apply(init_weights)
+        
+        return model
     
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x.repeat(1, 3, 1, 1))
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
         optimizer = torch.optim.Adam(params=self.parameters(), lr=self.opt.lr)
+        scheduler = {
+            'scheduler': ReduceLROnPlateau(optimizer, mode='min', patience=5, factor=0.5),
+            'monitor': 'val_loss',  # Metric to monitor
+            'interval': 'epoch',  # How often to check (epoch or step)
+            'frequency': 1,  # Check every epoch
+        }
         return {
             'optimizer': optimizer,
-            # 'lr_scheduler': MultiStepLR(optimizer, milestones=[5, ], gamma=0.001)
+            'lr_scheduler': scheduler
         }
+        
+    def on_train_epoch_start(self):
+        # Adjust weight decay after a specific epoch
+        if self.current_epoch >= 35:
+            for param_group in self.optimizer.param_groups:
+                param_group['weight_decay'] = 0.05
         
     def plot_gradcam(self, data: Tensor, logger_id: int) -> None:
         assert logger_id < len(self.loggers), 'Invalid logger id'
@@ -237,8 +262,8 @@ class BaseResNetModule(L.LightningModule):
             self.train_step_outputs['step_loss'].append(loss)
             self.train_step_outputs['step_metrics'].append(acc)
             
-        if batch_idx == len(self.trainer.train_dataloader) - 1:
-            self.plot_gradcam(data, 0)
+        # if batch_idx == len(self.trainer.train_dataloader) - 1:
+        #     self.plot_gradcam(data, 0)
 
         return loss
 
@@ -292,7 +317,7 @@ class ResNetMSTARModule(BaseResNetModule):
     
     def training_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
         data, label = batch
-        return super()._training_step(data, label)
+        return super()._training_step(data, label, batch_idx)
 
     def validation_step(self, batch: List[Tensor], batch_idx: int) -> None:
         data, label = batch
@@ -316,3 +341,72 @@ class ResNetSAMPLEModule(BaseResNetModule):
     def predict_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
         data, label, _ = batch
         return super()._predict_step(data, label)
+    
+
+def convert_to_complex(module: nn.Module) -> nn.Module:
+    cdtype = torch.complex64
+    for name, child in module.named_children():
+        if isinstance(child, nn.Conv2d):
+            setattr(
+                module,
+                name,
+                nn.Conv2d(
+                    child.in_channels,
+                    child.out_channels,
+                    child.kernel_size,
+                    stride=child.stride,
+                    padding=child.padding,
+                    bias=child.bias is not None,
+                    dtype=cdtype,
+                ),
+            )
+
+        elif isinstance(child, nn.ReLU):
+            setattr(module, name, c_nn.modReLU())
+
+        elif isinstance(child, nn.BatchNorm2d):
+            setattr(
+                module,
+                name,
+                c_nn.BatchNorm2d(
+                    child.num_features, cdtype=cdtype
+                ),
+            )
+        elif isinstance(child, nn.MaxPool2d):
+            setattr(
+                module,
+                name,
+                c_nn.AvgPool2d(
+                    child.kernel_size,
+                    stride=child.stride,
+                    padding=child.padding,
+                ),
+            )
+        elif isinstance(child, nn.Linear):
+            setattr(
+                module,
+                name,
+                nn.Linear(
+                    child.in_features,
+                    child.out_features,
+                    bias=child.bias is not None,
+                    dtype=cdtype,
+                ),
+            )
+        else:
+            convert_to_complex(child)
+
+    return module
+
+
+def init_weights(m: nn.Module) -> None:
+    """
+    Initialize weights for the given module.
+    """
+    if isinstance(m, (nn.Linear, nn.Conv2d)):
+        c_nn.init.complex_kaiming_normal_(m.weight, nonlinearity="relu")
+        if m.bias is not None:
+            m.bias.data.fill_(0.01)
+    if isinstance(m, c_nn.BatchNorm2d):
+        m.weight[:, 0, 0] = 1.0
+        m.weight[:, 1, 1] = 1.0

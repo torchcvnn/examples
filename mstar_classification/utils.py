@@ -52,7 +52,7 @@ def train_parser(parser: ArgumentParser) -> ArgumentParser:
     
     parser.add_argument('--lr', type=float, default=4e-3)
     parser.add_argument('--epochs', type=int, default=30)
-    parser.add_argument('--patience', type=int, default=10)
+    parser.add_argument('--patience', type=int, default=15)
     # Model parameters
     parser.add_argument('--hidden_dim', type=int, default=32)
     parser.add_argument('--num_layers', type=int, default=3)
@@ -187,18 +187,6 @@ class PadIfNeeded(complexTransform):
             paddings,
             mode=self.border_mode
         )
-        
-        
-class Compose(complexTransform):
-    
-    def __init__(self, transforms: Sequence[Callable], always_apply: bool = False, p: float = 0.5) -> None:
-        super().__init__(always_apply, p)
-        self.transforms = transforms
-        
-    def __call__(self, image: np.ndarray) -> np.ndarray:
-        for transform in self.transforms:
-            image = transform(image)
-        return image
     
     
 class ToMagnitude(torch.nn.Module):
@@ -216,3 +204,61 @@ class ToTensor:
         # Convert numpy array to PyTorch tensor and Rearrange dimensions from HWC to CHW
         tensor = torch.from_numpy(image).permute(2, 0, 1).to(self.dtype)
         return tensor
+    
+
+class CenterCrop(complexTransform):
+    def __init__(
+        self,
+        height: int,
+        width: int,
+        always_apply: bool = False,
+        p: float = 0.5,
+    ) -> None:
+        super().__init__(always_apply, p)
+
+        self.height = height
+        self.width = width
+        # TODO: other arguments
+
+    def __call__(self, image: np.ndarray) -> np.ndarray:
+        # Center crop the image
+        l_h = image.shape[0] // 2 - self.height // 2
+        r_h = l_h + self.height
+
+        l_w = image.shape[0] // 2 - self.width // 2
+        r_w = l_w + self.width
+        return image[l_h:r_h, l_w:r_h]
+
+
+class LogTransform(complexTransform):
+    def __init__(self, minval, maxval):
+        self.minval = minval
+        self.maxval = maxval
+
+    def __call__(self, image: np.ndarray) -> np.ndarray:
+        amplitude = np.clip(np.abs(image), self.minval, self.maxval)
+        norm_amplitude = (np.log10(amplitude) - np.log10(self.minval)) / (
+            np.log10(self.maxval) - np.log10(self.minval)
+        )
+        angle = np.angle(image)
+        return norm_amplitude * np.exp(1j * angle)
+    
+
+class MinMaxNormalize(complexTransform):
+    
+    def __init__(self, min: np.ndarray, max: np.ndarray) -> None:
+        self.min = min
+        self.max = max
+        
+    def minmaxnorm(self, image: np.ndarray) -> np.ndarray:
+        log_image = np.log10(np.abs(image) + np.spacing(1))
+        normalized_image = (log_image - self.min) / (self.max - self.min)
+        normalized_image = np.clip(normalized_image, 0, 1)
+        return normalized_image
+    
+    def __call__(self, image: np.ndarray) -> np.ndarray:
+        real, imag = image.real, image.imag
+        real = self.minmaxnorm(real)
+        imag = self.minmaxnorm(imag)
+        
+        return real + 1j * imag
