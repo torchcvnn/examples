@@ -31,7 +31,7 @@ from argparse import ArgumentParser
 import numpy as np
 
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 
 from lightning import Trainer, LightningModule
 from lightning.pytorch.loggers import TensorBoardLogger
@@ -70,8 +70,8 @@ def get_datasets(dataset: Dataset) -> Tuple[Dataset]:
     num_valid = int(0.2 * len(dataset))
     train_indices = indices[num_valid:]
     valid_indices = indices[:num_valid]
-    train_dataset = torch.utils.data.Subset(dataset, train_indices)
-    valid_dataset = torch.utils.data.Subset(dataset, valid_indices)
+    train_dataset = Subset(dataset, train_indices)
+    valid_dataset = Subset(dataset, valid_indices)
     
     return train_dataset, valid_dataset
 
@@ -208,7 +208,11 @@ class ToMagnitude(torch.nn.Module):
 
 
 class ToTensor:
+    
+    def __init__(self, dtype: torch.dtype = torch.complex64):
+        self.dtype = dtype
+    
     def __call__(self, image: np.ndarray) -> torch.Tensor:
         # Convert numpy array to PyTorch tensor and Rearrange dimensions from HWC to CHW
-        tensor = torch.from_numpy(image).permute(2, 0, 1).to(torch.complex64)
+        tensor = torch.from_numpy(image).permute(2, 0, 1).to(self.dtype)
         return tensor
