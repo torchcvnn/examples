@@ -171,7 +171,7 @@ class PadIfNeeded(complexTransform):
         self.border_mode = border_mode
         #TODO: other arguments
     
-    def __call__(self, image: np.ndarray) -> np.ndarray:
+    def padifneeded(self, image: np.ndarray) -> np.ndarray:
         # Pad the image if it is smaller than the desired size
         image_shapes = image.shape
         pad_top = (self.min_height - image_shapes[0]) // 2
@@ -187,6 +187,12 @@ class PadIfNeeded(complexTransform):
             paddings,
             mode=self.border_mode
         )
+    
+    def __call__(self, image: np.ndarray) -> np.ndarray:
+        if image.shape[0] < self.min_height:
+            return self.padifneeded(image)
+        else:
+            return image
     
     
 class ToMagnitude(torch.nn.Module):
