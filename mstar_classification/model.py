@@ -219,7 +219,7 @@ class BaseResNetModule(L.LightningModule):
         return self.model(x.repeat(1, 3, 1, 1))
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
-        optimizer = torch.optim.Adam(params=self.parameters(), lr=self.opt.lr)
+        optimizer = torch.optim.AdamW(params=self.parameters(), lr=self.opt.lr, weight_decay=0.05)
         scheduler = {
             'scheduler': ReduceLROnPlateau(optimizer, mode='min', patience=5, factor=0.5),
             'monitor': 'val_loss',  # Metric to monitor
@@ -230,12 +230,6 @@ class BaseResNetModule(L.LightningModule):
             'optimizer': optimizer,
             'lr_scheduler': scheduler
         }
-        
-    def on_train_epoch_start(self):
-        # Adjust weight decay after a specific epoch
-        if self.current_epoch >= 35:
-            for param_group in self.optimizer.param_groups:
-                param_group['weight_decay'] = 0.05
         
     def plot_gradcam(self, data: Tensor, logger_id: int) -> None:
         assert logger_id < len(self.loggers), 'Invalid logger id'
@@ -369,7 +363,7 @@ def convert_to_complex(module: nn.Module) -> nn.Module:
                 module,
                 name,
                 c_nn.BatchNorm2d(
-                    child.num_features, cdtype=cdtype
+                    child.num_features, track_running_stats=False, cdtype=cdtype
                 ),
             )
         elif isinstance(child, nn.MaxPool2d):

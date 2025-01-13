@@ -46,6 +46,7 @@ from utils import (
     ToTensor,
     CenterCrop,
     LogTransform,
+    PadIfNeeded,
     MinMaxNormalize
 )
 
@@ -56,6 +57,7 @@ def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Trainer):
         transform=v2.Compose(
             [
                 ApplyFFT2(),
+                PadIfNeeded(opt.input_size, opt.input_size),
                 CenterCrop(opt.input_size, opt.input_size),
                 ApplyIFFT2(),
                 LogTransform(2e-2, 40),
