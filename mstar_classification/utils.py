@@ -43,7 +43,6 @@ from lightning.pytorch.utilities import rank_zero_only
 def train_parser(parser: ArgumentParser) -> ArgumentParser:
     parser.add_argument('--version', type=int, required=True)
     parser.add_argument('--logdir', type=str, default='training_logs')
-    parser.add_argument('--weightdir', type=str, default='weights_storage/vit_mstar')
     parser.add_argument('--datadir', type=str, required=True)
     
     parser.add_argument('--patch_size', type=int, default=7)

@@ -22,6 +22,7 @@
 
 # Standard imports
 from argparse import ArgumentParser
+from pathlib import Path
 
 # External imports
 import torch
@@ -120,6 +121,7 @@ if __name__ == '__main__':
     parser = train_parser(parser)
     opt = parser.parse_args()
 
+    weightdir = str(Path('weights_storage') / f'version_{opt.version}')
     trainer = Trainer(
         max_epochs=opt.epochs,
         num_sanity_val_steps=0,
@@ -135,7 +137,7 @@ if __name__ == '__main__':
             ),
             LearningRateMonitor(logging_interval='epoch'),
             ModelCheckpoint(
-                dirpath=opt.weightdir,
+                dirpath=weightdir,
                 monitor='val_Accuracy', 
                 verbose=True, 
                 mode='max'

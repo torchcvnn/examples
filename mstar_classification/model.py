@@ -28,14 +28,14 @@ from argparse import ArgumentParser
 import torch
 import torch.nn as nn
 from torch import Tensor
-from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from torchvision.utils import make_grid
-from torchvision.models import resnet18, resnet34, resnet50
+from torchvision.models import resnet18
 
 import lightning as L
 
-from torchmetrics.classification import Accuracy, ConfusionMatrix
+from torchmetrics.classification import Accuracy
 
 import torchcvnn.nn as c_nn
 
@@ -197,11 +197,9 @@ class BaseResNetModule(L.LightningModule):
         self.model = self.configure_model()
         self.gradcam = GradCAM(self.model, 'layer3')
         self.accuracy = Accuracy(task='multiclass', num_classes=num_classes)
-        self.confusion_matrix = ConfusionMatrix(task='multiclass', num_classes=num_classes)
         
         self.train_step_outputs = {}
         self.valid_step_outputs = {}
-        self.test_step_outputs = {}
                 
     def configure_model(self):
         model = resnet18(num_classes=self.num_classes)
@@ -280,7 +278,7 @@ class BaseResNetModule(L.LightningModule):
             
     def _predict_step(self, data: Tensor, label: Tensor) -> Tuple[Tensor]:
         logits = self(data)
-        return self.accuracy(logits, label), self.confusion_matrix(logits, label)
+        return logits, label
 
     def on_train_epoch_end(self) -> None:
         _log_dict = {
