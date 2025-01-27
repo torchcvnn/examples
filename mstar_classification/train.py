@@ -34,7 +34,7 @@ from torchcvnn.datasets import MSTARTargets, SAMPLE
 from lightning import Trainer
 from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
 
-from torchmetrics.classification import ConfusionMatrix
+from torchmetrics.classification import ConfusionMatrix, Accuracy
 
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -52,8 +52,7 @@ from utils import (
     ToTensor,
     CenterCrop,
     LogTransform,
-    PadIfNeeded,
-    MinMaxNormalize
+    PadIfNeeded
 )
 
 def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Trainer):
@@ -80,7 +79,6 @@ def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Trainer):
     predictions = trainer.predict(dataloaders=valid_loader)
     preds = torch.cat([pred[0].softmax(-1) for pred in predictions], 0)
     labels = torch.cat([label[1] for label in predictions], 0)
-
     # Plot ConfusionMatrix
     confusion = ConfusionMatrix(task='multiclass', num_classes=len(dataset.class_names))
     confusion.update(preds, labels)
@@ -91,6 +89,14 @@ def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Trainer):
     sns.heatmap(confusion_matrix, fmt='d', cmap='Blues', xticklabels=dataset.class_names, yticklabels=dataset.class_names)
     plt.savefig('ConfusionMatrix.png')
     plt.show()
+    # Top-1 Accuracy
+    accuracy_1 = Accuracy(task='multiclass', num_classes=len(dataset.class_names))
+    accuracy_1 = accuracy_1(preds, labels)
+    print(f'Accuracy top-1: {accuracy_1.item()}')
+    # Top-5 Accuracy
+    accuracy_2 = Accuracy(task='multiclass', num_classes=len(dataset.class_names), top_k=5)
+    accuracy_2 = accuracy_2(preds, labels)
+    print(f'Accuracy top-5: {accuracy_2.item()}')
 
 
 def lightning_train_cplxSAMPLE(opt: ArgumentParser, trainer: Trainer):
