@@ -184,7 +184,165 @@ class Model(nn.Module):
         mean_features = features.mean(dim=1)
 
         return self.head(mean_features)
+
+
+class Attention(nn.Module):
+    def __init__(self, embed_dim: int, num_heads: int) -> None:
+        super().__init__()
+        
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.scale = self.head_dim ** - 0.5
+        self.q_norm = c_nn.RMSNorm(self.head_dim)
+        self.k_norm = c_nn.RMSNorm(self.head_dim)
+        self.qkv = nn.Linear(embed_dim, embed_dim * 3, dtype=torch.complex64)
+        
+    def forward(self, x: Tensor) -> Tensor:
+        B, N, _ = x.shape
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4).contiguous()
+        q, k, v = qkv.unbind(0)
+        q, k = self.q_norm(q), self.k_norm(k)
+        return self.scaled_dot_product_attention(q, k, v)
     
+    def scaled_dot_product_attention(self, q: Tensor, k: Tensor, v: Tensor) -> Tensor:
+        out = ((q @ k.transpose(-2, -1).conj()).real * self.scale).softmax(dim=-1)
+        return out.to(torch.complex64) @ v
+
+
+class Block(nn.Module):
+    def __init__(
+        self, 
+        embed_dim: int, 
+        hidden_dim: int,
+        num_heads: int,
+        dropout: float = 0.0
+    ) -> None:
+        super().__init__()
+        
+        self.attn = Attention(embed_dim, num_heads)
+        self.layer_norm = c_nn.RMSNorm(embed_dim)
+        self.linear = nn.Sequential(
+            nn.Linear(embed_dim, hidden_dim, dtype=torch.complex64),
+            c_nn.CGELU(),
+            c_nn.Dropout(dropout),
+            nn.Linear(hidden_dim, embed_dim, dtype=torch.complex64),
+            c_nn.Dropout(dropout)
+        )
+        
+    def forward(self, x: Tensor) -> Tensor:
+        # x = self.layer_norm(x)
+        B, N, C = x.shape
+        attn = self.attn(x).transpose(1, 2).reshape(B, N, C)
+        x = x + attn
+        x = x + self.linear(self.layer_norm(x))
+        # inp_x = self.layer_norm(x)
+        # x = x + self.attn(inp_x, inp_x, inp_x)[0]
+        # x = x + self.linear(self.layer_norm(x))
+        
+        return x
+    
+
+class VisionTransformer(nn.Module):
+    def __init__(
+        self,
+        embed_dim: int,
+        hidden_dim: int,
+        num_channels: int,
+        num_heads: int,
+        num_layers: int,
+        num_classes: int,
+        patch_size: int,
+        num_patches: int,
+        dropout: float = 0.0
+        ) -> None:
+        
+        super().__init__()
+        
+        self.patch_size = patch_size
+        self.patch_embedder = ConvStem(num_channels, hidden_dim, patch_size)
+        self.input_layer = nn.Linear(num_channels * (patch_size ** 2), embed_dim, dtype=torch.complex64)
+        self.transformer = nn.Sequential(
+            *(Block(
+                embed_dim,
+                hidden_dim, 
+                num_heads,
+                dropout=dropout
+            ) for _ in range(num_layers))
+        )
+        self.mlp_head = nn.Sequential(
+            c_nn.RMSNorm(embed_dim),
+            nn.Linear(embed_dim, num_classes, dtype=torch.complex64)
+        )
+        self.dropout = c_nn.Dropout(dropout)
+        
+        self.cls_token = nn.Parameter(torch.rand(1, 1, embed_dim, dtype=torch.complex64))
+        self.pos_embedding = nn.Parameter(torch.rand(1, 1 + num_patches, embed_dim, dtype=torch.complex64))
+        
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.patch_embedder(x)
+        B, T, _ = x.shape
+        x = self.input_layer(x)
+        
+        cls_token = self.cls_token.repeat(B, 1, 1)
+        x = torch.cat([cls_token, x], dim=1)
+        x = x + self.pos_embedding
+        
+        x = self.dropout(x)
+        # x = x.transpose(0, 1)
+        x = self.transformer(x)
+        
+        cls = x[:, 0] # position of cls_token
+        return self.mlp_head(cls)
+
+
+def im_to_patch(im, patch_size, flatten_channels: bool = True):
+    B, C, H, W = im.shape
+    assert H // patch_size != 0 and W // patch_size != 0, f"Image height and width are {H, W}, which is not a multiple of the patch size"
+    
+    im = im.reshape(B, C, H // patch_size, patch_size, W // patch_size, patch_size)
+    im = im.permute(0, 2, 4, 1, 3, 5)
+    im = im.flatten(1, 2)
+    
+    if flatten_channels:
+        return im.flatten(2, 4)
+    else:
+        return im
+    
+
+class ConvStem(nn.Module):
+    def __init__(self, in_channels, embed_dim, patch_size):
+        """
+        Convolutional Stem to replace im_to_patch.
+
+        Args:
+            in_channels (int): Number of input channels (e.g., 3 for RGB images).
+            embed_dim (int): The dimensionality of the patch embeddings.
+            patch_size (int): The equivalent patch size for downsampling (stride size in the final conv layer).
+        """
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels, embed_dim // 2, kernel_size=7, stride=2, padding=3, dtype=torch.complex64),
+            c_nn.BatchNorm2d(embed_dim // 2, track_running_stats=False),
+            c_nn.modReLU(),
+            nn.Conv2d(embed_dim // 2, embed_dim, kernel_size=3, stride=patch_size // 2, padding=1, dtype=torch.complex64),
+            c_nn.BatchNorm2d(embed_dim, track_running_stats=False),
+            c_nn.modReLU()
+        )
+
+    def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): Input image tensor of shape (B, C, H, W).
+        
+        Returns:
+            torch.Tensor: Patch embeddings of shape (B, embed_dim, H', W').
+        """
+        x = self.conv(x)  # Apply the convolutional stem
+        B, embed_dim, H, W = x.shape
+        x = x.flatten(2)  # Flatten the spatial dimensions
+        x = x.transpose(1, 2)  # Rearrange to (B, num_patches, embed_dim)
+        return x
+
 
 class BaseResNetModule(L.LightningModule):
 
@@ -202,8 +360,18 @@ class BaseResNetModule(L.LightningModule):
         self.valid_step_outputs = {}
                 
     def configure_model(self):
-        model = resnet18(num_classes=self.num_classes)
-        model = convert_to_complex(model)
+        model_kwargs = {
+            "embed_dim": 128, #embedded dim of the transformer model
+            "hidden_dim": 256, #hidden dim of mlp layer in attention block
+            "num_heads": 8, #number of self attention head
+            "num_layers": 3, #number of attention layers
+            "patch_size": 16, #size of an image patch after splitting
+            "num_channels": 1, #number of input image channel
+            "num_patches": 169, #number of patches splitted from image
+            "num_classes": 16, #number of class for the classification task
+            "dropout": 0.3,
+        }
+        model = VisionTransformer(**model_kwargs)
         model = nn.Sequential(
             model,
             c_nn.Mod(),
@@ -214,12 +382,12 @@ class BaseResNetModule(L.LightningModule):
         return model
     
     def forward(self, x: Tensor) -> Tensor:
-        return self.model(x.repeat(1, 3, 1, 1))
+        return self.model(x)
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
-        optimizer = torch.optim.AdamW(params=self.parameters(), lr=self.opt.lr, weight_decay=0.05)
+        optimizer = torch.optim.AdamW(params=self.parameters(), lr=self.opt.lr, weight_decay=0.03)
         scheduler = {
-            'scheduler': ReduceLROnPlateau(optimizer, mode='min', patience=5, factor=0.5),
+            'scheduler': ReduceLROnPlateau(optimizer, mode='min', patience=8, factor=0.5),
             'monitor': 'val_loss',  # Metric to monitor
             'interval': 'epoch',  # How often to check (epoch or step)
             'frequency': 1,  # Check every epoch
@@ -333,70 +501,13 @@ class ResNetSAMPLEModule(BaseResNetModule):
     def predict_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
         data, label, _ = batch
         return super()._predict_step(data, label)
-    
-
-def convert_to_complex(module: nn.Module) -> nn.Module:
-    cdtype = torch.complex64
-    for name, child in module.named_children():
-        if isinstance(child, nn.Conv2d):
-            setattr(
-                module,
-                name,
-                nn.Conv2d(
-                    child.in_channels,
-                    child.out_channels,
-                    child.kernel_size,
-                    stride=child.stride,
-                    padding=child.padding,
-                    bias=child.bias is not None,
-                    dtype=cdtype,
-                ),
-            )
-
-        elif isinstance(child, nn.ReLU):
-            setattr(module, name, c_nn.modReLU())
-
-        elif isinstance(child, nn.BatchNorm2d):
-            setattr(
-                module,
-                name,
-                c_nn.BatchNorm2d(
-                    child.num_features, track_running_stats=False, cdtype=cdtype
-                ),
-            )
-        elif isinstance(child, nn.MaxPool2d):
-            setattr(
-                module,
-                name,
-                c_nn.AvgPool2d(
-                    child.kernel_size,
-                    stride=child.stride,
-                    padding=child.padding,
-                ),
-            )
-        elif isinstance(child, nn.Linear):
-            setattr(
-                module,
-                name,
-                nn.Linear(
-                    child.in_features,
-                    child.out_features,
-                    bias=child.bias is not None,
-                    dtype=cdtype,
-                ),
-            )
-        else:
-            convert_to_complex(child)
-
-    return module
-
 
 def init_weights(m: nn.Module) -> None:
     """
     Initialize weights for the given module.
     """
     if isinstance(m, (nn.Linear, nn.Conv2d)):
-        c_nn.init.complex_kaiming_normal_(m.weight, nonlinearity="relu")
+        c_nn.init.complex_kaiming_normal_(m.weight)
         if m.bias is not None:
             m.bias.data.fill_(0.01)
     if isinstance(m, c_nn.BatchNorm2d):
