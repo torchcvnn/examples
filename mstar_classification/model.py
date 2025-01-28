@@ -230,7 +230,6 @@ class Block(nn.Module):
         )
         
     def forward(self, x: Tensor) -> Tensor:
-        # x = self.layer_norm(x)
         B, N, C = x.shape
         attn = self.attn(x).transpose(1, 2).reshape(B, N, C)
         x = x + attn
@@ -340,7 +339,7 @@ class ConvStem(nn.Module):
         return x
 
 
-class BaseResNetModule(L.LightningModule):
+class BaseClassificationModule(L.LightningModule):
 
     def __init__(self, opt: ArgumentParser, num_classes: int = 10):
         super().__init__()
@@ -458,7 +457,7 @@ class BaseResNetModule(L.LightningModule):
         self.valid_step_outputs.clear()
 
 
-class ResNetMSTARModule(BaseResNetModule):
+class MSTARClassificationModule(BaseClassificationModule):
     
     def training_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
         data, label = batch
@@ -473,7 +472,7 @@ class ResNetMSTARModule(BaseResNetModule):
         return super()._predict_step(data, label)
 
 
-class ResNetSAMPLEModule(BaseResNetModule):
+class SAMPLEClassificationModule(BaseClassificationModule):
 
     def training_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
         data, label, _ = batch

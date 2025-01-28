@@ -40,7 +40,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 # Local imports
-from model import ResNetMSTARModule, ResNetSAMPLEModule
+from model import MSTARClassificationModule, SAMPLEClassificationModule
 from utils import (
     CustomProgressBar,
     TBLogger,
@@ -72,7 +72,7 @@ def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Trainer):
     )
     train_dataset, valid_dataset = get_datasets(dataset)
     train_loader, valid_loader = get_dataloaders(opt, train_dataset, valid_dataset)
-    model = ResNetMSTARModule(opt, num_classes=len(dataset.class_names))
+    model = MSTARClassificationModule(opt, num_classes=len(dataset.class_names))
     # Train
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
     # Predict
@@ -115,7 +115,7 @@ def lightning_train_cplxSAMPLE(opt: ArgumentParser, trainer: Trainer):
     )
     train_dataset, valid_dataset = get_datasets(dataset)
     train_loader, valid_loader = get_dataloaders(opt, train_dataset, valid_dataset)
-    model = ResNetSAMPLEModule(opt, num_classes=len(dataset.class_names))
+    model = SAMPLEClassificationModule(opt, num_classes=len(dataset.class_names))
 
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
     predictions = trainer.predict(dataloaders=valid_loader)
