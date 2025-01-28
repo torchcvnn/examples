@@ -1,6 +1,6 @@
 # MIT License
 
-# Copyright (c) 2023 Jérémy Fix
+# Copyright (c) 2024-2025 Jérémy Fix, Xuan-Huy Nguyen
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,11 @@ import torchvision.transforms.v2 as v2_transforms
 
 import torchcvnn.nn as c_nn
 
+import lightning as L
+from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
+
+from torchmetrics.classification import Accuracy
+
 # Local imports
 import utils
 
@@ -65,6 +70,180 @@ def conv_block(in_c: int, out_c: int, cdtype: torch.dtype) -> List[nn.Module]:
         c_nn.Cardioid(),
         c_nn.AvgPool2d(kernel_size=2, stride=2, padding=0),
     ]
+
+
+class cMNISTModel(L.LightningModule):
+
+    def __init__(self):
+        super().__init__()
+
+        self.ce_loss = nn.CrossEntropyLoss()
+        self.model = self.configure_model()
+        self.accuracy = Accuracy(task='multiclass', num_classes=10)
+        
+        self.train_step_outputs = {}
+        self.valid_step_outputs = {}
+
+    def configure_model(self):
+        conv_model = nn.Sequential(
+            *conv_block(1, 16, torch.complex64),
+            *conv_block(16, 16, torch.complex64),
+            *conv_block(16, 32, torch.complex64),
+            *conv_block(32, 32, torch.complex64),
+            nn.Flatten(),
+        )
+
+        with torch.no_grad():
+            conv_model.eval()
+            dummy_input = torch.zeros((64, 1, 28, 28), dtype=torch.complex64, requires_grad=False)
+            out_conv = conv_model(dummy_input).view(64, -1)
+        lin_model = nn.Sequential(
+            nn.Linear(out_conv.shape[-1], 124, dtype=torch.complex64),
+            c_nn.Cardioid(),
+            nn.Linear(124, 10, dtype=torch.complex64),
+            c_nn.Mod(),
+        )
+
+        return nn.Sequential(conv_model, lin_model)
+    
+    def forward(self, x):
+        return self.model(x)
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(params=self.parameters(), lr=3e-4)
+    
+    def training_step(self, batch, batch_idx):
+        data, label = batch
+        logits = self(data)
+
+        loss = self.ce_loss(logits, label)
+        acc = self.accuracy(logits, label)
+
+        self.log('step_loss', loss, prog_bar=True, sync_dist=True)
+        self.log('step_metrics', acc, prog_bar=True, sync_dist=True)
+        
+        if not self.train_step_outputs:
+            self.train_step_outputs = {
+                'step_loss': [loss],
+                'step_metrics': [acc]
+            }
+        else:
+            self.train_step_outputs['step_loss'].append(loss)
+            self.train_step_outputs['step_metrics'].append(acc)
+
+        return loss
+
+    def validation_step(self, batch: torch.Tensor, batch_idx: int):
+        images, labels = batch
+        logits = self(images)
+
+        loss = self.ce_loss(logits, labels)
+        acc = self.accuracy(logits, labels)
+        self.log('step_loss', loss, prog_bar=True, sync_dist=True)
+        self.log('step_metrics', acc, prog_bar=True, sync_dist=True)
+        
+        if not self.valid_step_outputs:
+            self.valid_step_outputs = {
+                'step_loss': [loss],
+                'step_metrics': [acc]
+            }
+        else:
+            self.valid_step_outputs['step_loss'].append(loss)
+            self.valid_step_outputs['step_metrics'].append(acc)
+
+    def on_train_epoch_end(self) -> None:
+        _log_dict = {
+            'Loss/loss': torch.tensor(self.train_step_outputs['step_loss']).mean(),
+            'Metrics/accuracy': torch.tensor(self.train_step_outputs['step_metrics']).mean()
+        }
+        
+        self.loggers[0].log_metrics(_log_dict, self.current_epoch)
+        self.train_step_outputs.clear()
+
+    def on_validation_epoch_end(self) -> None:
+        mean_loss_value = torch.tensor(self.valid_step_outputs['step_loss']).mean()
+        mean_metrics_value = torch.tensor(self.valid_step_outputs['step_metrics']).mean()
+        
+        _log_dict = {
+            'Loss/loss': mean_loss_value,
+            'Metrics/accuracy': mean_metrics_value
+        }
+        
+        self.loggers[1].log_metrics(_log_dict, self.current_epoch)
+        
+        self.log('val_loss', mean_loss_value, sync_dist=True)
+        self.log('val_Accuracy', mean_metrics_value, sync_dist=True)
+        self.valid_step_outputs.clear()
+
+
+def lightning_train(version: int):
+    batch_size = 64
+    epochs = 10
+    torch.set_float32_matmul_precision('high')
+
+    # Dataloading
+    train_dataset = torchvision.datasets.MNIST(
+        root="./data",
+        train=True,
+        download=True,
+        transform=v2_transforms.Compose([v2_transforms.PILToTensor(), torch.fft.fft]),
+    )
+    valid_dataset = torchvision.datasets.MNIST(
+        root="./data",
+        train=False,
+        download=True,
+        transform=v2_transforms.Compose([v2_transforms.PILToTensor(), torch.fft.fft]),
+    )
+
+    # Train dataloader
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, 
+        batch_size=batch_size, 
+        shuffle=True,
+        num_workers=4,
+        persistent_workers=True,
+        pin_memory=True
+    )
+
+    # Valid dataloader
+    valid_loader = torch.utils.data.DataLoader(
+        valid_dataset, 
+        batch_size=batch_size, 
+        shuffle=False,
+        num_workers=4,
+        persistent_workers=True,
+        pin_memory=True
+    )
+
+    model = cMNISTModel()
+    trainer = L.Trainer(
+        max_epochs=epochs,
+        num_sanity_val_steps=0,
+        benchmark=True,
+        enable_checkpointing=True,
+        callbacks=[
+            utils.CustomProgressBar(),
+            EarlyStopping(
+                monitor='val_loss', 
+                verbose=True,
+                patience=5,
+                min_delta=0.005
+            ),
+            LearningRateMonitor(logging_interval='epoch'),
+            ModelCheckpoint(
+                dirpath='weights_storage/',
+                monitor='val_Accuracy', 
+                verbose=True, 
+                mode='max'
+            )
+        ],
+        logger=[
+            utils.TBLogger('training_logs', name=None, sub_dir='train', version=version),
+            utils.TBLogger('training_logs', name=None, sub_dir='valid', version=version)
+        ]
+    )
+
+    trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
 
 
 def train():
@@ -185,4 +364,4 @@ def train():
 
 
 if __name__ == "__main__":
-    train()
+    lightning_train(0)
