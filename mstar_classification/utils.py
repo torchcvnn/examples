@@ -56,7 +56,8 @@ def train_parser(parser: ArgumentParser) -> ArgumentParser:
     parser.add_argument('--hidden_dim', type=int, default=32)
     parser.add_argument('--num_layers', type=int, default=3)
     parser.add_argument('--num_heads', type=int, default=8)
-    parser.add_argument('--dropout', type=float, default=0.1)
+    parser.add_argument('--num_channels', type=int, default=1)
+    parser.add_argument('--dropout', type=float, default=0.3)
     parser.add_argument('--attention_dropout', type=float, default=0.1)
     parser.add_argument('--norm_layer', type=str, choices=['layer_norm', 'rms_norm'], default='rms_norm')
 
