@@ -254,9 +254,9 @@ class VisionTransformer(nn.Module):
         self.patch_size = opt.patch_size
         assert opt.input_size % opt.patch_size == 0, "Image size must be divisible by the patch size"
         self.num_patches = (opt.input_size // opt.patch_size) ** 2
-        self.embed_dim = opt.num_channels * (opt.patch_size ** 2)
-        self.patch_embedder = ConvStem(opt.num_channels, self.embed_dim, opt.patch_size)
-        self.input_layer = nn.Linear(self.embed_dim, self.embed_dim, dtype=torch.complex64)
+        self.embed_dim = int(opt.num_channels * (opt.patch_size ** 2) / 2)
+        self.patch_embedder = ConvStem(opt.num_channels, opt.hidden_dim, opt.patch_size)
+        self.input_layer = nn.Linear(opt.hidden_dim, self.embed_dim, dtype=torch.complex64)
         self.transformer = nn.Sequential(
             *(Block(
                 self.embed_dim,
@@ -306,7 +306,7 @@ def im_to_patch(im, patch_size, flatten_channels: bool = True):
     
 
 class ConvStem(nn.Module):
-    def __init__(self, in_channels, embed_dim, patch_size):
+    def __init__(self, in_channels, hidden_dim, patch_size):
         """
         Convolutional Stem to replace im_to_patch.
 
@@ -317,11 +317,11 @@ class ConvStem(nn.Module):
         """
         super().__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(in_channels, embed_dim // 2, kernel_size=7, stride=2, padding=3, dtype=torch.complex64),
-            c_nn.BatchNorm2d(embed_dim // 2, track_running_stats=False),
+            nn.Conv2d(in_channels, hidden_dim // 2, kernel_size=7, stride=2, padding=3, dtype=torch.complex64),
+            c_nn.BatchNorm2d(hidden_dim // 2, track_running_stats=False),
             c_nn.modReLU(),
-            nn.Conv2d(embed_dim // 2, embed_dim, kernel_size=3, stride=patch_size // 2, padding=1, dtype=torch.complex64),
-            c_nn.BatchNorm2d(embed_dim, track_running_stats=False),
+            nn.Conv2d(hidden_dim // 2, hidden_dim, kernel_size=3, stride=patch_size // 2, padding=1, dtype=torch.complex64),
+            c_nn.BatchNorm2d(hidden_dim, track_running_stats=False),
             c_nn.modReLU()
         )
 
