@@ -245,38 +245,37 @@ class Block(nn.Module):
 class VisionTransformer(nn.Module):
     def __init__(
         self,
+        opt: ArgumentParser,
         embed_dim: int,
         hidden_dim: int,
-        num_channels: int,
         num_heads: int,
         num_layers: int,
-        num_classes: int,
-        patch_size: int,
-        num_patches: int,
-        dropout: float = 0.0
+        num_classes: int
         ) -> None:
         
         super().__init__()
         
-        self.patch_size = patch_size
-        self.patch_embedder = ConvStem(num_channels, hidden_dim, patch_size)
-        self.input_layer = nn.Linear(num_channels * (patch_size ** 2), embed_dim, dtype=torch.complex64)
+        self.patch_size = opt.patch_size
+        assert opt.input_size % opt.patch_size == 0, "Image size must be divisible by the patch size"
+        self.num_patches = (opt.input_size // opt.patch_size) ** 2
+        self.patch_embedder = ConvStem(opt.num_channels, hidden_dim, opt.patch_size)
+        self.input_layer = nn.Linear(opt.num_channels * (opt.patch_size ** 2), embed_dim, dtype=torch.complex64)
         self.transformer = nn.Sequential(
             *(Block(
                 embed_dim,
                 hidden_dim, 
                 num_heads,
-                dropout=dropout
+                dropout=opt.dropout
             ) for _ in range(num_layers))
         )
         self.mlp_head = nn.Sequential(
             c_nn.RMSNorm(embed_dim),
             nn.Linear(embed_dim, num_classes, dtype=torch.complex64)
         )
-        self.dropout = c_nn.Dropout(dropout)
+        self.dropout = c_nn.Dropout(opt.dropout)
         
         self.cls_token = nn.Parameter(torch.rand(1, 1, embed_dim, dtype=torch.complex64))
-        self.pos_embedding = nn.Parameter(torch.rand(1, 1 + num_patches, embed_dim, dtype=torch.complex64))
+        self.pos_embedding = nn.Parameter(torch.rand(1, 1 + self.num_patches, embed_dim, dtype=torch.complex64))
         
     def forward(self, x: Tensor) -> Tensor:
         x = self.patch_embedder(x)
@@ -364,14 +363,10 @@ class BaseResNetModule(L.LightningModule):
             "embed_dim": 128, #embedded dim of the transformer model
             "hidden_dim": 256, #hidden dim of mlp layer in attention block
             "num_heads": 8, #number of self attention head
-            "num_layers": 3, #number of attention layers
-            "patch_size": 16, #size of an image patch after splitting
-            "num_channels": 1, #number of input image channel
-            "num_patches": 169, #number of patches splitted from image
-            "num_classes": 16, #number of class for the classification task
-            "dropout": 0.3,
+            "num_layers": 3, #number of attention layers,
+            "num_classes": self.num_classes
         }
-        model = VisionTransformer(**model_kwargs)
+        model = VisionTransformer(self.opt, **model_kwargs)
         model = nn.Sequential(
             model,
             c_nn.Mod(),
