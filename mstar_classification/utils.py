@@ -22,7 +22,8 @@
 # SOFTWARE.
 
 # Standard imports
-from typing import Dict, Sequence, Callable
+import random
+from typing import Dict, Sequence, Callable, Tuple
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser
 
@@ -30,7 +31,7 @@ from argparse import ArgumentParser
 import numpy as np
 
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 
 from lightning import Trainer, LightningModule
 from lightning.pytorch.loggers import TensorBoardLogger
@@ -42,28 +43,40 @@ from lightning.pytorch.utilities import rank_zero_only
 def train_parser(parser: ArgumentParser) -> ArgumentParser:
     parser.add_argument('--version', type=int, required=True)
     parser.add_argument('--logdir', type=str, default='training_logs')
-    parser.add_argument('--weightdir', type=str, default='weights_storage/vit_mstar')
     parser.add_argument('--datadir', type=str, required=True)
     
-    parser.add_argument('--patch_size', type=int, default=7)
-    parser.add_argument('--input_size', type=int, default=196)
-    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--patch_size', type=int, default=16)
+    parser.add_argument('--input_size', type=int, default=54)
+    parser.add_argument('--batch_size', type=int, default=128)
     
     parser.add_argument('--lr', type=float, default=4e-3)
     parser.add_argument('--epochs', type=int, default=30)
-    parser.add_argument('--patience', type=int, default=10)
+    parser.add_argument('--patience', type=int, default=15)
     # Model parameters
-    parser.add_argument('--hidden_dim', type=int, default=32)
+    parser.add_argument('--hidden_dim', type=int, default=256)
     parser.add_argument('--num_layers', type=int, default=3)
     parser.add_argument('--num_heads', type=int, default=8)
-    parser.add_argument('--dropout', type=float, default=0.1)
+    parser.add_argument('--num_channels', type=int, default=1)
+    parser.add_argument('--dropout', type=float, default=0.3)
     parser.add_argument('--attention_dropout', type=float, default=0.1)
     parser.add_argument('--norm_layer', type=str, choices=['layer_norm', 'rms_norm'], default='rms_norm')
 
     return parser
 
 
-def get_dataloaders(opt: ArgumentParser, train_dataset: Dataset, valid_dataset: Dataset) -> None:
+def get_datasets(dataset: Dataset) -> Tuple[Dataset]:
+    indices = list(range(len(dataset)))
+    random.shuffle(indices)
+    num_valid = int(0.2 * len(dataset))
+    train_indices = indices[num_valid:]
+    valid_indices = indices[:num_valid]
+    train_dataset = Subset(dataset, train_indices)
+    valid_dataset = Subset(dataset, valid_indices)
+    
+    return train_dataset, valid_dataset
+
+
+def get_dataloaders(opt: ArgumentParser, train_dataset: Dataset, valid_dataset: Dataset) -> Tuple[DataLoader]:
     # Train dataloader
     train_loader = DataLoader(
         train_dataset, 
@@ -111,6 +124,11 @@ class CustomProgressBar(TQDMProgressBar):
         bar.ascii = ' >'
         return bar
     
+    def init_predict_tqdm(self):
+        bar = super().init_validation_tqdm()
+        bar.ascii = ' >'
+        return bar
+    
 
 class complexTransform(ABC):
     
@@ -153,7 +171,7 @@ class PadIfNeeded(complexTransform):
         self.border_mode = border_mode
         #TODO: other arguments
     
-    def __call__(self, image: np.ndarray) -> np.ndarray:
+    def padifneeded(self, image: np.ndarray) -> np.ndarray:
         # Pad the image if it is smaller than the desired size
         image_shapes = image.shape
         pad_top = (self.min_height - image_shapes[0]) // 2
@@ -169,22 +187,84 @@ class PadIfNeeded(complexTransform):
             paddings,
             mode=self.border_mode
         )
-        
-        
-class Compose(complexTransform):
     
-    def __init__(self, transforms: Sequence[Callable], always_apply: bool = False, p: float = 0.5) -> None:
-        super().__init__(always_apply, p)
-        self.transforms = transforms
-        
     def __call__(self, image: np.ndarray) -> np.ndarray:
-        for transform in self.transforms:
-            image = transform(image)
-        return image
+        if image.shape[0] < self.min_height:
+            return self.padifneeded(image)
+        else:
+            return image
+    
+    
+class ToMagnitude(torch.nn.Module):
+    
+    def forward(self, image: np.ndarray) -> np.ndarray:
+        return np.abs(image)
 
 
 class ToTensor:
+    
+    def __init__(self, dtype: torch.dtype = torch.complex64):
+        self.dtype = dtype
+    
     def __call__(self, image: np.ndarray) -> torch.Tensor:
         # Convert numpy array to PyTorch tensor and Rearrange dimensions from HWC to CHW
-        tensor = torch.from_numpy(image).permute(2, 0, 1).to(torch.complex64)
+        tensor = torch.from_numpy(image).permute(2, 0, 1).to(self.dtype)
         return tensor
+    
+
+class CenterCrop(complexTransform):
+    def __init__(
+        self,
+        height: int,
+        width: int,
+        always_apply: bool = False,
+        p: float = 0.5,
+    ) -> None:
+        super().__init__(always_apply, p)
+
+        self.height = height
+        self.width = width
+        # TODO: other arguments
+
+    def __call__(self, image: np.ndarray) -> np.ndarray:
+        # Center crop the image
+        l_h = image.shape[0] // 2 - self.height // 2
+        r_h = l_h + self.height
+
+        l_w = image.shape[0] // 2 - self.width // 2
+        r_w = l_w + self.width
+        return image[l_h:r_h, l_w:r_h]
+
+
+class LogTransform(complexTransform):
+    def __init__(self, minval, maxval):
+        self.minval = minval
+        self.maxval = maxval
+
+    def __call__(self, image: np.ndarray) -> np.ndarray:
+        amplitude = np.clip(np.abs(image), self.minval, self.maxval)
+        norm_amplitude = (np.log10(amplitude) - np.log10(self.minval)) / (
+            np.log10(self.maxval) - np.log10(self.minval)
+        )
+        angle = np.angle(image)
+        return norm_amplitude * np.exp(1j * angle)
+    
+
+class MinMaxNormalize(complexTransform):
+    
+    def __init__(self, min: np.ndarray, max: np.ndarray) -> None:
+        self.min = min
+        self.max = max
+        
+    def minmaxnorm(self, image: np.ndarray) -> np.ndarray:
+        log_image = np.log10(np.abs(image) + np.spacing(1))
+        normalized_image = (log_image - self.min) / (self.max - self.min)
+        normalized_image = np.clip(normalized_image, 0, 1)
+        return normalized_image
+    
+    def __call__(self, image: np.ndarray) -> np.ndarray:
+        real, imag = image.real, image.imag
+        real = self.minmaxnorm(real)
+        imag = self.minmaxnorm(imag)
+        
+        return real + 1j * imag

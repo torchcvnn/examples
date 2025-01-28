@@ -22,64 +22,104 @@
 
 # Standard imports
 from argparse import ArgumentParser
+from pathlib import Path
 
 # External imports
 import torch
+
+import torchvision.transforms.v2 as v2
 
 from torchcvnn.datasets import MSTARTargets, SAMPLE
 
 from lightning import Trainer
 from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
 
+from torchmetrics.classification import ConfusionMatrix, Accuracy
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 # Local imports
-from model import ViTMSTARModule, ViTSAMPLEModule
-from utils import CustomProgressBar, TBLogger, PadIfNeeded, ApplyFFT2, ApplyIFFT2, Compose, train_parser, ToTensor, get_dataloaders
+from model import MSTARClassificationModule, SAMPLEClassificationModule
+from utils import (
+    CustomProgressBar,
+    TBLogger,
+    train_parser,
+    get_dataloaders,
+    get_datasets,
+    ApplyFFT2,
+    ApplyIFFT2,
+    ToTensor,
+    CenterCrop,
+    LogTransform,
+    PadIfNeeded
+)
 
-        
-def lightning_train_MSTAR(opt: ArgumentParser, trainer: Trainer):
+def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Trainer):
     # Dataloading
-    train_dataset = MSTARTargets(
+    dataset = MSTARTargets(
         opt.datadir,
-        transform=Compose([
-            ApplyFFT2(),
-            PadIfNeeded(opt.input_size, opt.input_size),
-            ApplyIFFT2(),
-            ToTensor()
-            # TODO: LogTransform
-        ])
+        transform=v2.Compose(
+            [
+                ApplyFFT2(),
+                PadIfNeeded(opt.input_size, opt.input_size),
+                CenterCrop(opt.input_size, opt.input_size),
+                ApplyIFFT2(),
+                LogTransform(2e-2, 40),
+                ToTensor(),
+            ]
+        ),
     )
-    valid_dataset = MSTARTargets(
-        opt.datadir,
-        transform=Compose([
-            ApplyFFT2(),
-            PadIfNeeded(opt.input_size, opt.input_size),
-            ApplyIFFT2(),
-            ToTensor()
-        ])
-    )
+    train_dataset, valid_dataset = get_datasets(dataset)
     train_loader, valid_loader = get_dataloaders(opt, train_dataset, valid_dataset)
-    model = ViTMSTARModule(opt, num_classes=len(train_dataset.class_names))
+    model = MSTARClassificationModule(opt, num_classes=len(dataset.class_names))
+    # Train
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
+    # Predict
+    predictions = trainer.predict(dataloaders=valid_loader)
+    preds = torch.cat([pred[0].softmax(-1) for pred in predictions], 0)
+    labels = torch.cat([label[1] for label in predictions], 0)
+    # Plot ConfusionMatrix
+    confusion = ConfusionMatrix(task='multiclass', num_classes=len(dataset.class_names))
+    confusion.update(preds, labels)
+    confusion_matrix = confusion.compute().numpy()
+    confusion_matrix = confusion_matrix / confusion_matrix.sum(axis=1, keepdims=True)
+
+    plt.figure(figsize=(12.5,10))
+    sns.heatmap(confusion_matrix, fmt='d', cmap='Blues', xticklabels=dataset.class_names, yticklabels=dataset.class_names)
+    plt.savefig('ConfusionMatrix.png')
+    plt.show()
+    # Top-1 Accuracy
+    accuracy_1 = Accuracy(task='multiclass', num_classes=len(dataset.class_names))
+    accuracy_1 = accuracy_1(preds, labels)
+    print(f'Accuracy top-1: {accuracy_1.item()}')
+    # Top-5 Accuracy
+    accuracy_2 = Accuracy(task='multiclass', num_classes=len(dataset.class_names), top_k=5)
+    accuracy_2 = accuracy_2(preds, labels)
+    print(f'Accuracy top-5: {accuracy_2.item()}')
 
 
-def lightning_train_SAMPLE(opt: ArgumentParser, trainer: Trainer):
+def lightning_train_cplxSAMPLE(opt: ArgumentParser, trainer: Trainer):
     # Dataloading
-    train_dataset = SAMPLE(
+    dataset = SAMPLE(
         opt.datadir,
-        transform=Compose([
-            ToTensor()
-            # TODO: LogTransform
-        ])
+        transform=v2.Compose(
+            [
+                ApplyFFT2(),
+                CenterCrop(opt.input_size, opt.input_size),
+                ApplyIFFT2(),
+                LogTransform(2e-2, 40),
+                ToTensor(),
+            ]
+        ),
     )
-    valid_dataset = SAMPLE(
-        opt.datadir,
-        transform=Compose([
-            ToTensor()
-        ])
-    )
+    train_dataset, valid_dataset = get_datasets(dataset)
     train_loader, valid_loader = get_dataloaders(opt, train_dataset, valid_dataset)
-    model = ViTSAMPLEModule(opt, num_classes=len(train_dataset.class_names))
+    model = SAMPLEClassificationModule(opt, num_classes=len(dataset.class_names))
+
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
+    predictions = trainer.predict(dataloaders=valid_loader)
+    print(predictions)
     
     
 if __name__ == '__main__':
@@ -87,6 +127,7 @@ if __name__ == '__main__':
     parser = train_parser(parser)
     opt = parser.parse_args()
 
+    weightdir = str(Path('weights_storage') / f'version_{opt.version}')
     trainer = Trainer(
         max_epochs=opt.epochs,
         num_sanity_val_steps=0,
@@ -98,11 +139,11 @@ if __name__ == '__main__':
                 monitor='val_loss', 
                 verbose=True,
                 patience=opt.patience,
-                min_delta=0.005
+                min_delta=0.0002
             ),
             LearningRateMonitor(logging_interval='epoch'),
             ModelCheckpoint(
-                dirpath=opt.weightdir,
+                dirpath=weightdir,
                 monitor='val_Accuracy', 
                 verbose=True, 
                 mode='max'
@@ -115,4 +156,4 @@ if __name__ == '__main__':
     )
     
     torch.set_float32_matmul_precision('high')
-    lightning_train_MSTAR(opt, trainer)
+    lightning_train_cplxMSTAR(opt, trainer)

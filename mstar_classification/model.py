@@ -28,6 +28,10 @@ from argparse import ArgumentParser
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+
+from torchvision.utils import make_grid
+from torchvision.models import resnet18
 
 import lightning as L
 
@@ -35,7 +39,10 @@ from torchmetrics.classification import Accuracy
 
 import torchcvnn.nn as c_nn
 
+from monai.visualize import GradCAM
+
 # Local imports
+
 
 class PatchEmbedder(nn.Module):
 
@@ -161,7 +168,7 @@ class Model(nn.Module):
             mlp_dim,
             dropout=opt.dropout,
             attention_dropout=opt.attention_dropout,
-            norm_layer=c_nn.RMSNorm,
+            norm_layer=c_nn.LayerNorm,
         )
 
         # A Linear decoding head to project on the logits
@@ -177,28 +184,211 @@ class Model(nn.Module):
         mean_features = features.mean(dim=1)
 
         return self.head(mean_features)
+
+
+class Attention(nn.Module):
+    def __init__(self, embed_dim: int, num_heads: int) -> None:
+        super().__init__()
+        
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.scale = self.head_dim ** - 0.5
+        self.q_norm = c_nn.RMSNorm(self.head_dim)
+        self.k_norm = c_nn.RMSNorm(self.head_dim)
+        self.qkv = nn.Linear(embed_dim, embed_dim * 3, dtype=torch.complex64)
+        
+    def forward(self, x: Tensor) -> Tensor:
+        B, N, _ = x.shape
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4).contiguous()
+        q, k, v = qkv.unbind(0)
+        q, k = self.q_norm(q), self.k_norm(k)
+        return self.scaled_dot_product_attention(q, k, v)
+    
+    def scaled_dot_product_attention(self, q: Tensor, k: Tensor, v: Tensor) -> Tensor:
+        out = ((q @ k.transpose(-2, -1).conj()).real * self.scale).softmax(dim=-1)
+        return out.to(torch.complex64) @ v
+
+
+class Block(nn.Module):
+    def __init__(
+        self, 
+        embed_dim: int, 
+        hidden_dim: int,
+        num_heads: int,
+        dropout: float = 0.0
+    ) -> None:
+        super().__init__()
+        
+        self.attn = Attention(embed_dim, num_heads)
+        self.layer_norm = c_nn.RMSNorm(embed_dim)
+        self.linear = nn.Sequential(
+            nn.Linear(embed_dim, hidden_dim, dtype=torch.complex64),
+            c_nn.CGELU(),
+            c_nn.Dropout(dropout),
+            nn.Linear(hidden_dim, embed_dim, dtype=torch.complex64),
+            c_nn.Dropout(dropout)
+        )
+        
+    def forward(self, x: Tensor) -> Tensor:
+        B, N, C = x.shape
+        attn = self.attn(x).transpose(1, 2).reshape(B, N, C)
+        x = x + attn
+        x = x + self.linear(self.layer_norm(x))
+        # inp_x = self.layer_norm(x)
+        # x = x + self.attn(inp_x, inp_x, inp_x)[0]
+        # x = x + self.linear(self.layer_norm(x))
+        
+        return x
     
 
-class BaseViTModule(L.LightningModule):
+class VisionTransformer(nn.Module):
+    def __init__(
+        self,
+        opt: ArgumentParser,
+        num_classes: int
+        ) -> None:
+        
+        super().__init__()
+        
+        self.patch_size = opt.patch_size
+        assert opt.input_size % opt.patch_size == 0, "Image size must be divisible by the patch size"
+        self.num_patches = (opt.input_size // opt.patch_size) ** 2
+        self.embed_dim = int(opt.num_channels * (opt.patch_size ** 2) / 2)
+        self.patch_embedder = ConvStem(opt.num_channels, opt.hidden_dim, opt.patch_size)
+        self.input_layer = nn.Linear(opt.hidden_dim, self.embed_dim, dtype=torch.complex64)
+        self.transformer = nn.Sequential(
+            *(Block(
+                self.embed_dim,
+                opt.hidden_dim, 
+                opt.num_heads,
+                dropout=opt.dropout
+            ) for _ in range(opt.num_layers))
+        )
+        self.mlp_head = nn.Sequential(
+            c_nn.RMSNorm(self.embed_dim),
+            nn.Linear(self.embed_dim, num_classes, dtype=torch.complex64)
+        )
+        self.dropout = c_nn.Dropout(opt.dropout)
+        
+        self.cls_token = nn.Parameter(torch.rand(1, 1, self.embed_dim, dtype=torch.complex64))
+        self.pos_embedding = nn.Parameter(torch.rand(1, 1 + self.num_patches, self.embed_dim, dtype=torch.complex64))
+        
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.patch_embedder(x)
+        B, T, _ = x.shape
+        x = self.input_layer(x)
+        
+        cls_token = self.cls_token.repeat(B, 1, 1)
+        x = torch.cat([cls_token, x], dim=1)
+        x = x + self.pos_embedding
+        
+        x = self.dropout(x)
+        # x = x.transpose(0, 1)
+        x = self.transformer(x)
+        
+        cls = x[:, 0] # position of cls_token
+        return self.mlp_head(cls)
+
+
+def im_to_patch(im, patch_size, flatten_channels: bool = True):
+    B, C, H, W = im.shape
+    assert H // patch_size != 0 and W // patch_size != 0, f"Image height and width are {H, W}, which is not a multiple of the patch size"
+    
+    im = im.reshape(B, C, H // patch_size, patch_size, W // patch_size, patch_size)
+    im = im.permute(0, 2, 4, 1, 3, 5)
+    im = im.flatten(1, 2)
+    
+    if flatten_channels:
+        return im.flatten(2, 4)
+    else:
+        return im
+    
+
+class ConvStem(nn.Module):
+    def __init__(self, in_channels, hidden_dim, patch_size):
+        """
+        Convolutional Stem to replace im_to_patch.
+
+        Args:
+            in_channels (int): Number of input channels (e.g., 3 for RGB images).
+            embed_dim (int): The dimensionality of the patch embeddings.
+            patch_size (int): The equivalent patch size for downsampling (stride size in the final conv layer).
+        """
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels, hidden_dim // 2, kernel_size=7, stride=2, padding=3, dtype=torch.complex64),
+            c_nn.BatchNorm2d(hidden_dim // 2, track_running_stats=False),
+            c_nn.modReLU(),
+            nn.Conv2d(hidden_dim // 2, hidden_dim, kernel_size=3, stride=patch_size // 2, padding=1, dtype=torch.complex64),
+            c_nn.BatchNorm2d(hidden_dim, track_running_stats=False),
+            c_nn.modReLU()
+        )
+
+    def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): Input image tensor of shape (B, C, H, W).
+        
+        Returns:
+            torch.Tensor: Patch embeddings of shape (B, embed_dim, H', W').
+        """
+        x = self.conv(x)  # Apply the convolutional stem
+        B, embed_dim, H, W = x.shape
+        x = x.flatten(2)  # Flatten the spatial dimensions
+        x = x.transpose(1, 2)  # Rearrange to (B, num_patches, embed_dim)
+        return x
+
+
+class BaseClassificationModule(L.LightningModule):
 
     def __init__(self, opt: ArgumentParser, num_classes: int = 10):
         super().__init__()
 
         self.opt = opt
         self.ce_loss = nn.CrossEntropyLoss()
-        self.model = Model(opt, num_classes)
+        self.num_classes = num_classes
+        self.model = self.configure_model()
+        self.gradcam = GradCAM(self.model, 'layer3')
         self.accuracy = Accuracy(task='multiclass', num_classes=num_classes)
         
         self.train_step_outputs = {}
         self.valid_step_outputs = {}
+                
+    def configure_model(self):
+        model = VisionTransformer(self.opt, self.num_classes)
+        model = nn.Sequential(
+            model,
+            c_nn.Mod(),
+        )
+        with torch.no_grad():
+            model.apply(init_weights)
+        
+        return model
     
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
-        return torch.optim.Adam(params=self.parameters(), lr=self.opt.lr)
+        optimizer = torch.optim.AdamW(params=self.parameters(), lr=self.opt.lr, weight_decay=0.03)
+        scheduler = {
+            'scheduler': ReduceLROnPlateau(optimizer, mode='min', patience=8, factor=0.5),
+            'monitor': 'val_loss',  # Metric to monitor
+            'interval': 'epoch',  # How often to check (epoch or step)
+            'frequency': 1,  # Check every epoch
+        }
+        return {
+            'optimizer': optimizer,
+            'lr_scheduler': scheduler
+        }
+        
+    def plot_gradcam(self, data: Tensor, logger_id: int) -> None:
+        assert logger_id < len(self.loggers), 'Invalid logger id'
+        gradient_cam = self.gradcam(data.repeat(1, 3, 1, 1))
+        grid = make_grid(gradient_cam * 0.5 + data * 0.5) #, make_grid(data)
+        self.loggers[logger_id].experiment.add_image('gradcam', grid, self.current_epoch)
+        # self.loggers[logger_id].experiment.add_image('images', grid[1], self.current_epoch)
     
-    def _training_step(self, data: Tensor, label: Tensor) -> Tensor:
+    def _training_step(self, data: Tensor, label: Tensor, batch_idx: int) -> Tensor:
         logits = self(data)
 
         loss = self.ce_loss(logits, label)
@@ -215,6 +405,9 @@ class BaseViTModule(L.LightningModule):
         else:
             self.train_step_outputs['step_loss'].append(loss)
             self.train_step_outputs['step_metrics'].append(acc)
+            
+        # if batch_idx == len(self.trainer.train_dataloader) - 1:
+        #     self.plot_gradcam(data, 0)
 
         return loss
 
@@ -234,6 +427,10 @@ class BaseViTModule(L.LightningModule):
         else:
             self.valid_step_outputs['step_loss'].append(loss)
             self.valid_step_outputs['step_metrics'].append(acc)
+            
+    def _predict_step(self, data: Tensor, label: Tensor) -> Tuple[Tensor]:
+        logits = self(data)
+        return logits, label
 
     def on_train_epoch_end(self) -> None:
         _log_dict = {
@@ -260,23 +457,43 @@ class BaseViTModule(L.LightningModule):
         self.valid_step_outputs.clear()
 
 
-class ViTMSTARModule(BaseViTModule):
+class MSTARClassificationModule(BaseClassificationModule):
     
     def training_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
         data, label = batch
-        return super()._training_step(data, label)
+        return super()._training_step(data, label, batch_idx)
 
     def validation_step(self, batch: List[Tensor], batch_idx: int) -> None:
         data, label = batch
         super()._validation_step(data, label)
+        
+    def predict_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
+        data, label = batch
+        return super()._predict_step(data, label)
 
 
-class ViTSAMPLEModule(BaseViTModule):
+class SAMPLEClassificationModule(BaseClassificationModule):
 
     def training_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
         data, label, _ = batch
-        return super()._training_step(data, label)
+        return super()._training_step(data, label, batch_idx)
 
     def validation_step(self, batch: List[Tensor], batch_idx: int) -> None:
         data, label, _ = batch
         super()._validation_step(data, label)
+        
+    def predict_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
+        data, label, _ = batch
+        return super()._predict_step(data, label)
+
+def init_weights(m: nn.Module) -> None:
+    """
+    Initialize weights for the given module.
+    """
+    if isinstance(m, (nn.Linear, nn.Conv2d)):
+        c_nn.init.complex_kaiming_normal_(m.weight)
+        if m.bias is not None:
+            m.bias.data.fill_(0.01)
+    if isinstance(m, c_nn.BatchNorm2d):
+        m.weight[:, 0, 0] = 1.0
+        m.weight[:, 1, 1] = 1.0
