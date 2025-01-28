@@ -246,10 +246,6 @@ class VisionTransformer(nn.Module):
     def __init__(
         self,
         opt: ArgumentParser,
-        embed_dim: int,
-        hidden_dim: int,
-        num_heads: int,
-        num_layers: int,
         num_classes: int
         ) -> None:
         
@@ -258,24 +254,25 @@ class VisionTransformer(nn.Module):
         self.patch_size = opt.patch_size
         assert opt.input_size % opt.patch_size == 0, "Image size must be divisible by the patch size"
         self.num_patches = (opt.input_size // opt.patch_size) ** 2
-        self.patch_embedder = ConvStem(opt.num_channels, hidden_dim, opt.patch_size)
-        self.input_layer = nn.Linear(opt.num_channels * (opt.patch_size ** 2), embed_dim, dtype=torch.complex64)
+        self.embed_dim = opt.num_channels * (opt.patch_size ** 2)
+        self.patch_embedder = ConvStem(opt.num_channels, self.embed_dim, opt.patch_size)
+        self.input_layer = nn.Linear(self.embed_dim, self.embed_dim, dtype=torch.complex64)
         self.transformer = nn.Sequential(
             *(Block(
-                embed_dim,
-                hidden_dim, 
-                num_heads,
+                self.embed_dim,
+                opt.hidden_dim, 
+                opt.num_heads,
                 dropout=opt.dropout
-            ) for _ in range(num_layers))
+            ) for _ in range(opt.num_layers))
         )
         self.mlp_head = nn.Sequential(
-            c_nn.RMSNorm(embed_dim),
-            nn.Linear(embed_dim, num_classes, dtype=torch.complex64)
+            c_nn.RMSNorm(self.embed_dim),
+            nn.Linear(self.embed_dim, num_classes, dtype=torch.complex64)
         )
         self.dropout = c_nn.Dropout(opt.dropout)
         
-        self.cls_token = nn.Parameter(torch.rand(1, 1, embed_dim, dtype=torch.complex64))
-        self.pos_embedding = nn.Parameter(torch.rand(1, 1 + self.num_patches, embed_dim, dtype=torch.complex64))
+        self.cls_token = nn.Parameter(torch.rand(1, 1, self.embed_dim, dtype=torch.complex64))
+        self.pos_embedding = nn.Parameter(torch.rand(1, 1 + self.num_patches, self.embed_dim, dtype=torch.complex64))
         
     def forward(self, x: Tensor) -> Tensor:
         x = self.patch_embedder(x)
@@ -359,14 +356,7 @@ class BaseResNetModule(L.LightningModule):
         self.valid_step_outputs = {}
                 
     def configure_model(self):
-        model_kwargs = {
-            "embed_dim": 128, #embedded dim of the transformer model
-            "hidden_dim": 256, #hidden dim of mlp layer in attention block
-            "num_heads": 8, #number of self attention head
-            "num_layers": 3, #number of attention layers,
-            "num_classes": self.num_classes
-        }
-        model = VisionTransformer(self.opt, **model_kwargs)
+        model = VisionTransformer(self.opt, self.num_classes)
         model = nn.Sequential(
             model,
             c_nn.Mod(),
