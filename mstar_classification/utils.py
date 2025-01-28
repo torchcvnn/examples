@@ -45,15 +45,15 @@ def train_parser(parser: ArgumentParser) -> ArgumentParser:
     parser.add_argument('--logdir', type=str, default='training_logs')
     parser.add_argument('--datadir', type=str, required=True)
     
-    parser.add_argument('--patch_size', type=int, default=7)
+    parser.add_argument('--patch_size', type=int, default=16)
     parser.add_argument('--input_size', type=int, default=54)
-    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--batch_size', type=int, default=128)
     
     parser.add_argument('--lr', type=float, default=4e-3)
     parser.add_argument('--epochs', type=int, default=30)
     parser.add_argument('--patience', type=int, default=15)
     # Model parameters
-    parser.add_argument('--hidden_dim', type=int, default=32)
+    parser.add_argument('--hidden_dim', type=int, default=256)
     parser.add_argument('--num_layers', type=int, default=3)
     parser.add_argument('--num_heads', type=int, default=8)
     parser.add_argument('--num_channels', type=int, default=1)
