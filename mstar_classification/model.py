@@ -185,6 +185,29 @@ class Model(nn.Module):
         return self.head(mean_features)
 
 
+class Image2Patch(nn.Module):
+
+    def __init__(self, patch_size: int, flatten_channels: bool = True):
+        super().__init__()
+        self.patch_size = patch_size
+        self.flatten_channels = flatten_channels
+
+    def forward(self, x: Tensor) -> Tensor:
+        B, C, H, W = x.shape
+        assert (
+            H // self.patch_size != 0 and W // self.patch_size != 0
+        ), f"Image height and width are {H, W}, which is not a multiple of the patch size"
+
+        x = x.reshape(B, C, H // self.patch_size, self.patch_size, W // self.patch_size, self.patch_size)
+        x = x.permute(0, 2, 4, 1, 3, 5)
+        x = x.flatten(1, 2)
+
+        if self.flatten_channels:
+            return x.flatten(2, 4)
+        else:
+            return x
+
+
 class Attention(nn.Module):
     def __init__(self, embed_dim: int, num_heads: int) -> None:
         super().__init__()
@@ -252,7 +275,10 @@ class VisionTransformer(nn.Module):
         ), "Image size must be divisible by the patch size"
         self.num_patches = (opt.input_size // opt.patch_size) ** 2
         self.embed_dim = int(opt.num_channels * (opt.patch_size**2) / 2)
-        self.patch_embedder = ConvStem(opt.num_channels, opt.hidden_dim, opt.patch_size)
+        if "hybrid" in opt.model_type:
+            self.patch_embedder = ConvStem(opt.num_channels, opt.hidden_dim, opt.patch_size)
+        else:
+            self.patch_embedder = Image2Patch(opt.patch_size)
         self.input_layer = nn.Linear(
             opt.hidden_dim, self.embed_dim, dtype=torch.complex64
         )
@@ -292,22 +318,6 @@ class VisionTransformer(nn.Module):
 
         cls = x[:, 0]  # position of cls_token
         return self.mlp_head(cls)
-
-
-def im_to_patch(im, patch_size, flatten_channels: bool = True):
-    B, C, H, W = im.shape
-    assert (
-        H // patch_size != 0 and W // patch_size != 0
-    ), f"Image height and width are {H, W}, which is not a multiple of the patch size"
-
-    im = im.reshape(B, C, H // patch_size, patch_size, W // patch_size, patch_size)
-    im = im.permute(0, 2, 4, 1, 3, 5)
-    im = im.flatten(1, 2)
-
-    if flatten_channels:
-        return im.flatten(2, 4)
-    else:
-        return im
 
 
 class ConvStem(nn.Module):
@@ -372,15 +382,104 @@ class BaseClassificationModule(L.LightningModule):
 
         self.train_step_outputs = {}
         self.valid_step_outputs = {}
+    
+    @staticmethod
+    def convert_to_complex(module: nn.Module) -> nn.Module:
+        cdtype = torch.complex64
+        for name, child in module.named_children():
+            if isinstance(child, nn.Conv2d):
+                setattr(
+                    module,
+                    name,
+                    nn.Conv2d(
+                        child.in_channels,
+                        child.out_channels,
+                        child.kernel_size,
+                        stride=child.stride,
+                        padding=child.padding,
+                        bias=child.bias is not None,
+                        dtype=cdtype,
+                    ),
+                )
 
+            elif isinstance(child, nn.ReLU):
+                setattr(module, name, c_nn.modReLU())
+
+            elif isinstance(child, nn.BatchNorm2d):
+                setattr(
+                    module,
+                    name,
+                    c_nn.BatchNorm2d(
+                        child.num_features, cdtype=cdtype
+                    ),
+                )
+            elif isinstance(child, nn.MaxPool2d):
+                setattr(
+                    module,
+                    name,
+                    c_nn.AvgPool2d(
+                        child.kernel_size,
+                        stride=child.stride,
+                        padding=child.padding,
+                    ),
+                )
+            elif isinstance(child, nn.Linear):
+                setattr(
+                    module,
+                    name,
+                    nn.Linear(
+                        child.in_features,
+                        child.out_features,
+                        bias=child.bias is not None,
+                        dtype=cdtype,
+                    ),
+                )
+            else:
+                BaseClassificationModule.convert_to_complex(child)
+
+        return module
+        
+    @staticmethod
+    def init_weights(m: nn.Module) -> None:
+        """
+        Initialize weights for the given module.
+        """
+        if isinstance(m, (nn.Linear, nn.Conv2d)):
+            c_nn.init.complex_kaiming_normal_(m.weight)
+            if m.bias is not None:
+                m.bias.data.fill_(0.01)
+        if isinstance(m, c_nn.BatchNorm2d):
+            m.weight[:, 0, 0] = 1.0
+            m.weight[:, 1, 1] = 1.0
+
+    def define_resnet18(self):
+        model = resnet18(num_classes=self.num_classes)
+        # Modify the first convolutional layer to accept 1 input channel
+        model.conv1 = nn.Conv2d(
+            in_channels=1,
+            out_channels=model.conv1.out_channels,
+            kernel_size=model.conv1.kernel_size,
+            stride=model.conv1.stride,
+            padding=model.conv1.padding,
+            bias=model.conv1.bias is not None,
+        )
+        return self.convert_to_complex(model)
+    
+    def define_vit(self):
+        return VisionTransformer(self.opt, self.num_classes)
+         
     def configure_model(self):
-        model = VisionTransformer(self.opt, self.num_classes)
+        choices = {"resnet18": self.define_resnet18, "vit": self.define_vit}
+        for choice, model_fn in choices.items():
+            if choice in self.opt.model_type:
+                model = model_fn()
+            
         model = nn.Sequential(
             model,
             c_nn.Mod(),
         )
         with torch.no_grad():
-            model.apply(init_weights)
+            model.apply(self.init_weights)
 
         return model
 
@@ -503,16 +602,3 @@ class SAMPLEClassificationModule(BaseClassificationModule):
     def predict_step(self, batch: List[Tensor], batch_idx: int) -> Tensor:
         data, label, _ = batch
         return super()._predict_step(data, label)
-
-
-def init_weights(m: nn.Module) -> None:
-    """
-    Initialize weights for the given module.
-    """
-    if isinstance(m, (nn.Linear, nn.Conv2d)):
-        c_nn.init.complex_kaiming_normal_(m.weight)
-        if m.bias is not None:
-            m.bias.data.fill_(0.01)
-    if isinstance(m, c_nn.BatchNorm2d):
-        m.weight[:, 0, 0] = 1.0
-        m.weight[:, 1, 1] = 1.0
