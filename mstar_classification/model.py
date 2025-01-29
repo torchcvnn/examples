@@ -274,13 +274,16 @@ class VisionTransformer(nn.Module):
             opt.input_size % opt.patch_size == 0
         ), "Image size must be divisible by the patch size"
         self.num_patches = (opt.input_size // opt.patch_size) ** 2
-        self.embed_dim = int(opt.num_channels * (opt.patch_size**2) / 2)
         if "hybrid" in opt.model_type:
             self.patch_embedder = ConvStem(opt.num_channels, opt.hidden_dim, opt.patch_size)
+            self.embed_dim = int(opt.num_channels * (opt.patch_size**2) / 2)
+            input_layer_channels = opt.hidden_dim
         else:
             self.patch_embedder = Image2Patch(opt.patch_size)
+            self.embed_dim = int(opt.hidden_dim / 2)
+            input_layer_channels = opt.num_channels * (opt.patch_size**2)
         self.input_layer = nn.Linear(
-            opt.hidden_dim, self.embed_dim, dtype=torch.complex64
+            input_layer_channels, self.embed_dim, dtype=torch.complex64
         )
         self.transformer = nn.Sequential(
             *(
@@ -295,7 +298,6 @@ class VisionTransformer(nn.Module):
             nn.Linear(self.embed_dim, num_classes, dtype=torch.complex64),
         )
         self.dropout = c_nn.Dropout(opt.dropout)
-
         self.cls_token = nn.Parameter(
             torch.rand(1, 1, self.embed_dim, dtype=torch.complex64)
         )
