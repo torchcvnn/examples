@@ -41,25 +41,27 @@ from lightning.pytorch.utilities import rank_zero_only
 
 
 def train_parser(parser: ArgumentParser) -> ArgumentParser:
-    parser.add_argument('--version', type=int, required=True)
-    parser.add_argument('--logdir', type=str, default='training_logs')
-    parser.add_argument('--datadir', type=str, required=True)
-    
-    parser.add_argument('--patch_size', type=int, default=16)
-    parser.add_argument('--input_size', type=int, default=54)
-    parser.add_argument('--batch_size', type=int, default=128)
-    
-    parser.add_argument('--lr', type=float, default=4e-3)
-    parser.add_argument('--epochs', type=int, default=30)
-    parser.add_argument('--patience', type=int, default=15)
+    parser.add_argument("--version", type=int, required=True)
+    parser.add_argument("--logdir", type=str, default="training_logs")
+    parser.add_argument("--datadir", type=str, required=True)
+
+    parser.add_argument("--patch_size", type=int, default=16)
+    parser.add_argument("--input_size", type=int, default=54)
+    parser.add_argument("--batch_size", type=int, default=128)
+
+    parser.add_argument("--lr", type=float, default=4e-3)
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--patience", type=int, default=15)
     # Model parameters
-    parser.add_argument('--hidden_dim', type=int, default=256)
-    parser.add_argument('--num_layers', type=int, default=3)
-    parser.add_argument('--num_heads', type=int, default=8)
-    parser.add_argument('--num_channels', type=int, default=1)
-    parser.add_argument('--dropout', type=float, default=0.3)
-    parser.add_argument('--attention_dropout', type=float, default=0.1)
-    parser.add_argument('--norm_layer', type=str, choices=['layer_norm', 'rms_norm'], default='rms_norm')
+    parser.add_argument("--hidden_dim", type=int, default=256)
+    parser.add_argument("--num_layers", type=int, default=3)
+    parser.add_argument("--num_heads", type=int, default=8)
+    parser.add_argument("--num_channels", type=int, default=1)
+    parser.add_argument("--dropout", type=float, default=0.3)
+    parser.add_argument("--attention_dropout", type=float, default=0.1)
+    parser.add_argument(
+        "--norm_layer", type=str, choices=["layer_norm", "rms_norm"], default="rms_norm"
+    )
 
     return parser
 
@@ -72,28 +74,30 @@ def get_datasets(dataset: Dataset) -> Tuple[Dataset]:
     valid_indices = indices[:num_valid]
     train_dataset = Subset(dataset, train_indices)
     valid_dataset = Subset(dataset, valid_indices)
-    
+
     return train_dataset, valid_dataset
 
 
-def get_dataloaders(opt: ArgumentParser, train_dataset: Dataset, valid_dataset: Dataset) -> Tuple[DataLoader]:
+def get_dataloaders(
+    opt: ArgumentParser, train_dataset: Dataset, valid_dataset: Dataset
+) -> Tuple[DataLoader]:
     # Train dataloader
     train_loader = DataLoader(
-        train_dataset, 
-        batch_size=opt.batch_size, 
+        train_dataset,
+        batch_size=opt.batch_size,
         shuffle=True,
         num_workers=4,
         persistent_workers=True,
-        pin_memory=True
+        pin_memory=True,
     )
     # Validation dataloader
     valid_loader = DataLoader(
-        valid_dataset, 
-        batch_size=opt.batch_size, 
+        valid_dataset,
+        batch_size=opt.batch_size,
         shuffle=True,
         num_workers=4,
         persistent_workers=True,
-        pin_memory=True
+        pin_memory=True,
     )
     return train_loader, valid_loader
 
@@ -101,58 +105,56 @@ def get_dataloaders(opt: ArgumentParser, train_dataset: Dataset, valid_dataset: 
 class TBLogger(TensorBoardLogger):
     @rank_zero_only
     def log_metrics(self, metrics: Dict[str, float | int], step: int) -> None:
-        metrics.pop('epoch', None)
-        metrics = {k: v for k, v in metrics.items() if ('step' not in k) and ('val' not in k)}
+        metrics.pop("epoch", None)
+        metrics = {
+            k: v for k, v in metrics.items() if ("step" not in k) and ("val" not in k)
+        }
         super().log_metrics(metrics, step)
-    
-    
+
+
 class CustomProgressBar(TQDMProgressBar):
-    
     def get_metrics(self, trainer: Trainer, model: LightningModule) -> Dict[str, float]:
         items = super().get_metrics(trainer, model)
         items.pop("v_num", None)
         return items
-    
+
     def init_train_tqdm(self) -> Tqdm:
         """Override this to customize the tqdm bar for training."""
         bar = super().init_train_tqdm()
-        bar.ascii = ' >'
+        bar.ascii = " >"
         return bar
-    
+
     def init_validation_tqdm(self) -> Tqdm:
         bar = super().init_validation_tqdm()
-        bar.ascii = ' >'
+        bar.ascii = " >"
         return bar
-    
+
     def init_predict_tqdm(self):
         bar = super().init_validation_tqdm()
-        bar.ascii = ' >'
+        bar.ascii = " >"
         return bar
-    
+
 
 class complexTransform(ABC):
-    
     def __init__(self, always_apply: bool = False, p: float = 0.5) -> None:
         self.always_apply = always_apply
         self.p = p
-    
+
     @abstractmethod
     def __call__(self, image: np.ndarray) -> np.ndarray:
         raise NotImplementedError
-    
+
 
 class ApplyFFT2(complexTransform):
-    
     def __init__(self, always_apply: bool = False, p: float = 0.5) -> None:
         super().__init__(always_apply, p)
 
     def __call__(self, image: np.ndarray) -> np.ndarray:
         # Apply 2D FFT to the image
         return np.fft.fftshift(np.fft.fft2(image, axes=(0, 1)), axes=(0, 1))
-    
-    
+
+
 class ApplyIFFT2(complexTransform):
-    
     def __init__(self, always_apply: bool = False, p: float = 0.5) -> None:
         super().__init__(always_apply, p)
 
@@ -162,15 +164,21 @@ class ApplyIFFT2(complexTransform):
 
 
 class PadIfNeeded(complexTransform):
-    
-    def __init__(self, min_height: int, min_width: int, border_mode: str = 'constant', always_apply: bool = False, p: float = 0.5) -> None:
+    def __init__(
+        self,
+        min_height: int,
+        min_width: int,
+        border_mode: str = "constant",
+        always_apply: bool = False,
+        p: float = 0.5,
+    ) -> None:
         super().__init__(always_apply, p)
-        
+
         self.min_height = min_height
         self.min_width = min_width
         self.border_mode = border_mode
-        #TODO: other arguments
-    
+        # TODO: other arguments
+
     def padifneeded(self, image: np.ndarray) -> np.ndarray:
         # Pad the image if it is smaller than the desired size
         image_shapes = image.shape
@@ -178,39 +186,33 @@ class PadIfNeeded(complexTransform):
         pad_bottom = self.min_height - image_shapes[0] - pad_top
         pad_left = (self.min_width - image_shapes[1]) // 2
         pad_right = self.min_width - image_shapes[1] - pad_left
-        
+
         paddings = ((pad_top, pad_bottom), (pad_left, pad_right))
         if len(image_shapes) == 3:
             paddings += ((0, 0),)
-        return np.pad(
-            image,
-            paddings,
-            mode=self.border_mode
-        )
-    
+        return np.pad(image, paddings, mode=self.border_mode)
+
     def __call__(self, image: np.ndarray) -> np.ndarray:
         if image.shape[0] < self.min_height:
             return self.padifneeded(image)
         else:
             return image
-    
-    
+
+
 class ToMagnitude(torch.nn.Module):
-    
     def forward(self, image: np.ndarray) -> np.ndarray:
         return np.abs(image)
 
 
 class ToTensor:
-    
     def __init__(self, dtype: torch.dtype = torch.complex64):
         self.dtype = dtype
-    
+
     def __call__(self, image: np.ndarray) -> torch.Tensor:
         # Convert numpy array to PyTorch tensor and Rearrange dimensions from HWC to CHW
         tensor = torch.from_numpy(image).permute(2, 0, 1).to(self.dtype)
         return tensor
-    
+
 
 class CenterCrop(complexTransform):
     def __init__(
@@ -248,23 +250,22 @@ class LogTransform(complexTransform):
         )
         angle = np.angle(image)
         return norm_amplitude * np.exp(1j * angle)
-    
+
 
 class MinMaxNormalize(complexTransform):
-    
     def __init__(self, min: np.ndarray, max: np.ndarray) -> None:
         self.min = min
         self.max = max
-        
+
     def minmaxnorm(self, image: np.ndarray) -> np.ndarray:
         log_image = np.log10(np.abs(image) + np.spacing(1))
         normalized_image = (log_image - self.min) / (self.max - self.min)
         normalized_image = np.clip(normalized_image, 0, 1)
         return normalized_image
-    
+
     def __call__(self, image: np.ndarray) -> np.ndarray:
         real, imag = image.real, image.imag
         real = self.minmaxnorm(real)
         imag = self.minmaxnorm(imag)
-        
+
         return real + 1j * imag
