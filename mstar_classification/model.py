@@ -487,12 +487,18 @@ class BaseClassificationModule(L.LightningModule):
         return self.model(x)
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
+        if "resnet18" in self.opt.model_type:
+            weight_decay = 0.05
+            patience = 5
+        else:
+            weight_decay = 0.03
+            patience = 8
         optimizer = torch.optim.AdamW(
-            params=self.parameters(), lr=self.opt.lr, weight_decay=0.03
+            params=self.parameters(), lr=self.opt.lr, weight_decay=weight_decay
         )
         scheduler = {
             "scheduler": ReduceLROnPlateau(
-                optimizer, mode="min", patience=8, factor=0.5
+                optimizer, mode="min", patience=patience, factor=0.5
             ),
             "monitor": "val_loss",  # Metric to monitor
             "interval": "epoch",  # How often to check (epoch or step)
