@@ -4,6 +4,6 @@ This example demonstrates how to patch a real-valued neural network to replace t
 
 ```bash
 python -m pip install torchcvnn
-python -m pip install seaborn matplotlib torchvision torchmetrics lightning
+python -m pip install seaborn matplotlib torchvision torchmetrics lightning monai tensorboard
 python train.py --version 0 --datadir MSTAR_DATADIR 
 ```
