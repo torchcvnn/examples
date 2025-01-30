@@ -186,7 +186,12 @@ class Model(nn.Module):
 
 
 class Image2Patch(nn.Module):
+    """Converts an image into patches.
 
+    Args:
+        patch_size (int): size of the patch
+        flatten_channels (bool): whether to flatten the channels of the patch representation
+    """
     def __init__(self, patch_size: int, flatten_channels: bool = True):
         super().__init__()
         self.patch_size = patch_size
@@ -197,18 +202,29 @@ class Image2Patch(nn.Module):
         assert (
             H // self.patch_size != 0 and W // self.patch_size != 0
         ), f"Image height and width are {H, W}, which is not a multiple of the patch size"
-
+        # Shape of x: (B, C, H, W)
+        # Reshape to (B, C, number of patch along H, patch_size, number of patch along W, patch_size)
         x = x.reshape(B, C, H // self.patch_size, self.patch_size, W // self.patch_size, self.patch_size)
+        # Permute axis. Shape of x after permute: (B, number of patch along H, number of patch along W, C, patch_size, patch_size)
         x = x.permute(0, 2, 4, 1, 3, 5)
+        # Flatten 1st and 2nd axis to obtain to total amount of patches. Shape of x after flatten: (B, number of patch, C, patch_size, patch_size)
         x = x.flatten(1, 2)
 
         if self.flatten_channels:
+            # Flatten to obtain a 1D patch representation. Shape of x after flatten: (B, number of patch, C * patch_size * patch_size)
             return x.flatten(2, 4)
         else:
+            # Return full patch representation. Shape of x: (B, number of patch, C, patch_size, patch_size)
             return x
 
 
 class Attention(nn.Module):
+    """Complex-valued attention layer for Vision Transformer, as proposed in "Building Blocks for a Complex-Valued Transformer Architecture" by Eilers et al.
+
+    Args:
+        embed_dim (int): Embedding dimension
+        num_heads (int): Number of attention heads
+    """
     def __init__(self, embed_dim: int, num_heads: int) -> None:
         super().__init__()
 
@@ -224,10 +240,10 @@ class Attention(nn.Module):
         qkv = (
             self.qkv(x)
             .reshape(B, N, 3, self.num_heads, self.head_dim)
-            .permute(2, 0, 3, 1, 4)
+            .permute(2, 0, 3, 1, 4) # (3, B, num_heads, num_patches, head_dim)
             .contiguous()
         )
-        q, k, v = qkv.unbind(0)
+        q, k, v = qkv.unbind(0) # (B, num_heads, num_patches, head_dim)
         q, k = self.q_norm(q), self.k_norm(k)
         return self.scaled_dot_product_attention(q, k, v)
 
@@ -237,6 +253,14 @@ class Attention(nn.Module):
 
 
 class Block(nn.Module):
+    """Vision Transformer block.
+
+    Args:
+        embed_dim (int): Embedded dimension
+        hidden_dim (int): Hidden dimension
+        num_heads (int): Number of attention heads
+        dropout (float): Dropout rate
+    """
     def __init__(
         self, embed_dim: int, hidden_dim: int, num_heads: int, dropout: float = 0.0
     ) -> None:
@@ -265,6 +289,14 @@ class Block(nn.Module):
 
 
 class VisionTransformer(nn.Module):
+    """Vision Transformer model implementation based on the paper "An image is worth 16x16 words: Transformers for image recognition at scale" by Dosovitskiy et al.
+    It is adapted to work with complex-valued inputs, with complex-valued blocks from torchcvnn, and a complex-valued attention layer.
+
+    Args:
+        opt (ArgumentParser): model configuration defined in the parser.
+        num_classes (int): Number of classes in the dataset.
+    """
+    # This module was implemented based on 
     def __init__(self, opt: ArgumentParser, num_classes: int) -> None:
 
         super().__init__()
@@ -274,6 +306,7 @@ class VisionTransformer(nn.Module):
             opt.input_size % opt.patch_size == 0
         ), "Image size must be divisible by the patch size"
         self.num_patches = (opt.input_size // opt.patch_size) ** 2
+        # Define whether to use traditional ViT or hybrid-ViT
         if "hybrid" in opt.model_type:
             self.patch_embedder = ConvStem(opt.num_channels, opt.hidden_dim, opt.patch_size)
             self.embed_dim = int(opt.num_channels * (opt.patch_size**2) / 2)
@@ -282,9 +315,11 @@ class VisionTransformer(nn.Module):
             self.patch_embedder = Image2Patch(opt.patch_size)
             self.embed_dim = int(opt.hidden_dim / 2)
             input_layer_channels = opt.num_channels * (opt.patch_size**2)
+        # Input layer
         self.input_layer = nn.Linear(
             input_layer_channels, self.embed_dim, dtype=torch.complex64
         )
+        # Tranformer blocks
         self.transformer = nn.Sequential(
             *(
                 Block(
@@ -293,14 +328,17 @@ class VisionTransformer(nn.Module):
                 for _ in range(opt.num_layers)
             )
         )
+        # MLP head
         self.mlp_head = nn.Sequential(
             c_nn.RMSNorm(self.embed_dim),
             nn.Linear(self.embed_dim, num_classes, dtype=torch.complex64),
         )
         self.dropout = c_nn.Dropout(opt.dropout)
+        # Class tokens
         self.cls_token = nn.Parameter(
             torch.rand(1, 1, self.embed_dim, dtype=torch.complex64)
         )
+        # Positional embeddings
         self.pos_embedding = nn.Parameter(
             torch.rand(1, 1 + self.num_patches, self.embed_dim, dtype=torch.complex64)
         )
@@ -315,23 +353,25 @@ class VisionTransformer(nn.Module):
         x = x + self.pos_embedding
 
         x = self.dropout(x)
-        # x = x.transpose(0, 1)
         x = self.transformer(x)
 
-        cls = x[:, 0]  # position of cls_token
+        cls = x[:, 0] # position of cls_token
         return self.mlp_head(cls)
 
 
 class ConvStem(nn.Module):
-    def __init__(self, in_channels, hidden_dim, patch_size):
-        """
-        Convolutional Stem to replace im_to_patch.
+    """
+        Convolutional Stem to replace Image2Patch.
+        This converts vanilla Vision Transformers into a hybrid model.
+        Stem layers work as a compression mechanism over the initial image, they typically compute convolution with large kernel size and/or stride. 
+        This leads to a better spatial dimension, which could be help the Vision Transformer to generalize better.
 
         Args:
-            in_channels (int): Number of input channels (e.g., 3 for RGB images).
-            embed_dim (int): The dimensionality of the patch embeddings.
-            patch_size (int): The equivalent patch size for downsampling (stride size in the final conv layer).
+            in_channels (int): Number of input channels. For MSTAR dataset, it is 1.
+            hidden_dim (int): Dimension of the hidden dimension of the ViT.
+            patch_size (int): Patch size used to split the image.
         """
+    def __init__(self, in_channels, hidden_dim, patch_size):
         super().__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(
@@ -362,12 +402,14 @@ class ConvStem(nn.Module):
             x (torch.Tensor): Input image tensor of shape (B, C, H, W).
 
         Returns:
-            torch.Tensor: Patch embeddings of shape (B, embed_dim, H', W').
+            torch.Tensor: Patch embeddings of shape (B, hidden_dim, H, W).
         """
-        x = self.conv(x)  # Apply the convolutional stem
-        B, embed_dim, H, W = x.shape
-        x = x.flatten(2)  # Flatten the spatial dimensions
-        x = x.transpose(1, 2)  # Rearrange to (B, num_patches, embed_dim)
+        # Apply the convolutional stem. Output shape: (B, hidden_dim, num_patches_H, num_patches_W)
+        x = self.conv(x)
+        # Flatten the pathces. Output shape: (B, hidden_dim, num_patches_H * num_patches_W)
+        x = x.flatten(2)
+        # Rearrange to (B, num_patches_H * num_patches_W, hidden_dim)
+        x = x.transpose(1, 2)
         return x
 
 
@@ -387,6 +429,7 @@ class BaseClassificationModule(L.LightningModule):
     
     @staticmethod
     def convert_to_complex(module: nn.Module) -> nn.Module:
+        # Patch real-valued architectures into complex-valued ones.
         cdtype = torch.complex64
         for name, child in module.named_children():
             if isinstance(child, nn.Conv2d):
