@@ -36,7 +36,7 @@ Below are some examples of Vision Transformers architectures.
 | ViT_1      |    3   |   8   |       256        |
 | ViT_2      |    3   |   8   |       128        |
 | ViT_3      |    2   |   4   |       128        |
-| Hybrid-ViT |    3   |   8   |       128        |
+| Hybrid-ViT |    3   |   8   |       256        |
 
 ## Classification performance
 | Models     | Params | Input size | Top-1 Accuracy | Top-5 Accuracy |
