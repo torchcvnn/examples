@@ -11,9 +11,9 @@ data:
   test_ratio: 0.15
 logging:
   logdir: ./logs
-  wandb:
-    entity: equivariant_cvnn
-    project: polsf_test
+  #wandb:
+  #  entity: MY_WANDB_ENTITY
+  #  project: MY_WANDB_PROJECT
 model:
   activation: modReLU
   channels_ratio: 16
