@@ -1,11 +1,5 @@
 # External imports
 import torch
-from torch.nn import MSELoss, L1Loss, SmoothL1Loss, CrossEntropyLoss, NLLLoss
-from torchcvnn.nn.modules.loss import ComplexMSELoss
-from torchtmpl.losses import (
-    ComplexCrossEntropyLoss,
-    FocalLoss,
-)
 from torch.optim.lr_scheduler import (
     StepLR,
     ReduceLROnPlateau,
@@ -13,19 +7,6 @@ from torch.optim.lr_scheduler import (
     OneCycleLR,
     CosineAnnealingLR,
 )
-
-
-def get_loss(config, class_weights=None, ignore_index=-100, gamma=0.0):
-    loss_name = config["loss"]["name"]
-    if loss_name == "ComplexCrossEntropyLoss" and class_weights is not None:
-        return ComplexCrossEntropyLoss(
-            class_weights=class_weights, ignore_index=ignore_index
-        )
-    elif loss_name == "FocalLoss" and class_weights is not None:
-        gamma = config["loss"]["gamma"]
-        return FocalLoss(alpha=class_weights, ignore_index=ignore_index, gamma=gamma)
-    else:
-        return globals()[loss_name]()
 
 
 def get_optimizer(cfg, params):
