@@ -10,4 +10,6 @@ weights_storage/
 # playground jupyter notebooks
 *.ipynb
 
+# log files and other generated files
+*.txt
 ConfusionMatrix.png
