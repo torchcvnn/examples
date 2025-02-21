@@ -24,6 +24,7 @@
 from argparse import ArgumentParser
 from pathlib import Path
 from typing import Callable
+import os
 
 # External imports
 import torch
@@ -57,7 +58,7 @@ from utils import (
 )
 
 
-def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Callable) -> None:
+def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Callable, tmpdir: str) -> None:
     # Dataloading
     dataset = MSTARTargets(
         opt.datadir,
@@ -93,7 +94,7 @@ def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Callable) -> None:
         xticklabels=dataset.class_names,
         yticklabels=dataset.class_names,
     )
-    plt.savefig("ConfusionMatrix.png")
+    plt.savefig(f"{tmpdir}/ConfusionMatrix.png")
     # Top-1 Accuracy
     accuracy_1 = Accuracy(task="multiclass", num_classes=len(dataset.class_names))
     accuracy_1 = accuracy_1(preds, labels)
@@ -133,8 +134,9 @@ if __name__ == "__main__":
     parser = train_parser(parser)
     opt = parser.parse_args()
 
-    weightdir = str(Path("weights_storage") / f"version_{opt.version}")
-    logdir = str(Path("training_logs") / f"version_{opt.version}")
+    tmpdir = os.getenv('TMPDIR', '')
+    weightdir = str(tmpdir / Path('weights_storage') / f'version_{opt.version}')
+    logdir = str(tmpdir / Path("training_logs") / f"version_{opt.version}")
     trainer = Trainer(
         max_epochs=opt.epochs,
         num_sanity_val_steps=0,
@@ -160,4 +162,4 @@ if __name__ == "__main__":
     )
 
     torch.set_float32_matmul_precision("high")
-    lightning_train_cplxMSTAR(opt, trainer)
+    lightning_train_cplxMSTAR(opt, trainer, tmpdir)
