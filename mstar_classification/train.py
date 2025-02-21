@@ -58,7 +58,7 @@ from utils import (
 )
 
 
-def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Callable, tmpdir: str) -> None:
+def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Callable) -> None:
     # Dataloading
     dataset = MSTARTargets(
         opt.datadir,
@@ -94,7 +94,7 @@ def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Callable, tmpdir: st
         xticklabels=dataset.class_names,
         yticklabels=dataset.class_names,
     )
-    plt.savefig(f"{tmpdir}/ConfusionMatrix.png")
+    plt.savefig("ConfusionMatrix.png")
     # Top-1 Accuracy
     accuracy_1 = Accuracy(task="multiclass", num_classes=len(dataset.class_names))
     accuracy_1 = accuracy_1(preds, labels)
@@ -136,7 +136,6 @@ if __name__ == "__main__":
 
     tmpdir = os.getenv('TMPDIR', '')
     weightdir = str(tmpdir / Path('weights_storage') / f'version_{opt.version}')
-    logdir = str(tmpdir / Path("training_logs") / f"version_{opt.version}")
     trainer = Trainer(
         max_epochs=opt.epochs,
         num_sanity_val_steps=0,
@@ -156,10 +155,10 @@ if __name__ == "__main__":
             ),
         ],
         logger=[
-            TBLogger(logdir, name=None, sub_dir="train", version=opt.version),
-            TBLogger(logdir, name=None, sub_dir="valid", version=opt.version),
+            TBLogger("training_logs", name=None, sub_dir="train", version=f"version_{opt.version}"),
+            TBLogger("training_logs", name=None, sub_dir="valid", version=f"version_{opt.version}"),
         ],
     )
 
     torch.set_float32_matmul_precision("high")
-    lightning_train_cplxMSTAR(opt, trainer, tmpdir)
+    lightning_train_cplxMSTAR(opt, trainer)
