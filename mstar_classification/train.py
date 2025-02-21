@@ -159,6 +159,7 @@ if __name__ == "__main__":
             TBLogger(opt.logdir, name=None, sub_dir="valid", version=f"version_{opt.version}"),
         ],
     )
-
+    
+    torch.backends.cudnn.enabled = True
     torch.set_float32_matmul_precision("high")
     lightning_train_cplxMSTAR(opt, trainer)
