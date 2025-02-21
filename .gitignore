@@ -9,3 +9,5 @@ weights_storage/
 
 # playground jupyter notebooks
 *.ipynb
+
+ConfusionMatrix.png
