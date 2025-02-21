@@ -37,7 +37,6 @@ from lightning.pytorch.utilities import rank_zero_only
 
 def train_parser(parser: ArgumentParser) -> ArgumentParser:
     parser.add_argument("--version", type=str, required=True)
-    parser.add_argument("--logdir", type=str, default="training_logs")
     parser.add_argument("--datadir", type=str, required=True)
 
     parser.add_argument("--patch_size", type=int, default=16)

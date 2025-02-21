@@ -94,7 +94,6 @@ def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Callable) -> None:
         yticklabels=dataset.class_names,
     )
     plt.savefig("ConfusionMatrix.png")
-    plt.show()
     # Top-1 Accuracy
     accuracy_1 = Accuracy(task="multiclass", num_classes=len(dataset.class_names))
     accuracy_1 = accuracy_1(preds, labels)
@@ -135,6 +134,7 @@ if __name__ == "__main__":
     opt = parser.parse_args()
 
     weightdir = str(Path("weights_storage") / f"version_{opt.version}")
+    logdir = str(Path("training_logs") / f"version_{opt.version}")
     trainer = Trainer(
         max_epochs=opt.epochs,
         num_sanity_val_steps=0,
@@ -154,8 +154,8 @@ if __name__ == "__main__":
             ),
         ],
         logger=[
-            TBLogger(opt.logdir, name=None, sub_dir="train", version=opt.version),
-            TBLogger(opt.logdir, name=None, sub_dir="valid", version=opt.version),
+            TBLogger(logdir, name=None, sub_dir="train", version=opt.version),
+            TBLogger(logdir, name=None, sub_dir="valid", version=opt.version),
         ],
     )
 
