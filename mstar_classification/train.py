@@ -155,8 +155,8 @@ if __name__ == "__main__":
             ),
         ],
         logger=[
-            TBLogger("training_logs", name=None, sub_dir="train", version=f"version_{opt.version}"),
-            TBLogger("training_logs", name=None, sub_dir="valid", version=f"version_{opt.version}"),
+            TBLogger(opt.logdir, name=None, sub_dir="train", version=f"version_{opt.version}"),
+            TBLogger(opt.logdir, name=None, sub_dir="valid", version=f"version_{opt.version}"),
         ],
     )
 
