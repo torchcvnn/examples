@@ -27,6 +27,7 @@ from . import models
 from . import optim
 from . import utils
 from . import visualization as vis
+from . import losses
 import torchtmpl as tl
 from torchcvnn.datasets import PolSFDataset
 
@@ -275,7 +276,8 @@ def load(config: dict) -> tuple:
 
     # Build the loss function
     logging.info("= Loss")
-    loss = nn.CrossEntropyLoss(ignore_index=ignore_index)
+    # loss = nn.CrossEntropyLoss(ignore_index=ignore_index)
+    loss = losses.FocalLoss(ignore_index=ignore_index)
 
     # Build the optimizer
     logging.info("= Optimizer")
@@ -636,10 +638,7 @@ def test(params: list) -> None:
         indices,
     ) = dt.get_full_image_dataloader(data_config)
 
-    (
-        reconstructed_tensors,
-        list_of_indices,
-    ) = utils.one_forward(
+    (reconstructed_tensors, list_of_indices,) = utils.one_forward(
         model=model,
         loader=data_loader,
         device=device,
