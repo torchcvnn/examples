@@ -9,3 +9,8 @@ weights_storage/
 
 # playground jupyter notebooks
 *.ipynb
+
+polsf_unet/logs/*
+
+polsf_unet/wandb/*
+venv/*
