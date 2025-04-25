@@ -10,6 +10,11 @@ weights_storage/
 # playground jupyter notebooks
 *.ipynb
 
+polsf_unet/logs/*
+
+polsf_unet/wandb/*
+venv/*
+
 # log files and other generated files
 *.txt
 ConfusionMatrix.png
