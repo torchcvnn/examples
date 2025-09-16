@@ -23,11 +23,19 @@
 # Standard imports
 from argparse import ArgumentParser
 from pathlib import Path
+from typing import Callable
+import os
 
 # External imports
 import torch
 import torchvision.transforms.v2 as v2
 from torchcvnn.datasets import MSTARTargets, SAMPLE
+from torchcvnn.transforms import (
+    HWC2CHW,
+    LogAmplitude,
+    ToTensor,
+    FFTResize
+)
 from lightning import Trainer
 from lightning.pytorch.callbacks import (
     EarlyStopping,
@@ -46,28 +54,20 @@ from utils import (
     TBLogger,
     train_parser,
     get_dataloaders,
-    get_datasets,
-    ApplyFFT2,
-    ApplyIFFT2,
-    ToTensor,
-    CenterCrop,
-    LogTransform,
-    PadIfNeeded,
+    get_datasets
 )
 
 
-def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Trainer):
+def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Callable) -> None:
     # Dataloading
     dataset = MSTARTargets(
         opt.datadir,
         transform=v2.Compose(
             [
-                ApplyFFT2(),
-                PadIfNeeded(opt.input_size, opt.input_size),
-                CenterCrop(opt.input_size, opt.input_size),
-                ApplyIFFT2(),
-                LogTransform(2e-2, 40),
-                ToTensor(),
+                HWC2CHW(),
+                FFTResize((opt.input_size, opt.input_size)),
+                LogAmplitude(),
+                ToTensor('complex64'),
             ]
         ),
     )
@@ -95,7 +95,6 @@ def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Trainer):
         yticklabels=dataset.class_names,
     )
     plt.savefig("ConfusionMatrix.png")
-    plt.show()
     # Top-1 Accuracy
     accuracy_1 = Accuracy(task="multiclass", num_classes=len(dataset.class_names))
     accuracy_1 = accuracy_1(preds, labels)
@@ -108,17 +107,16 @@ def lightning_train_cplxMSTAR(opt: ArgumentParser, trainer: Trainer):
     print(f"Accuracy top-5: {accuracy_2.item()}")
 
 
-def lightning_train_cplxSAMPLE(opt: ArgumentParser, trainer: Trainer):
+def lightning_train_cplxSAMPLE(opt: ArgumentParser, trainer: Callable) -> None:
     # Dataloading
     dataset = SAMPLE(
         opt.datadir,
         transform=v2.Compose(
             [
-                ApplyFFT2(),
-                CenterCrop(opt.input_size, opt.input_size),
-                ApplyIFFT2(),
-                LogTransform(2e-2, 40),
-                ToTensor(),
+                HWC2CHW(),
+                FFTResize((opt.input_size, opt.input_size)),
+                LogAmplitude(),
+                ToTensor('complex64'),
             ]
         ),
     )
@@ -136,7 +134,8 @@ if __name__ == "__main__":
     parser = train_parser(parser)
     opt = parser.parse_args()
 
-    weightdir = str(Path("weights_storage") / f"version_{opt.version}")
+    tmpdir = os.getenv('TMPDIR', '')
+    weightdir = str(tmpdir / Path('weights_storage') / f'version_{opt.version}')
     trainer = Trainer(
         max_epochs=opt.epochs,
         num_sanity_val_steps=0,
@@ -156,10 +155,11 @@ if __name__ == "__main__":
             ),
         ],
         logger=[
-            TBLogger(opt.logdir, name=None, sub_dir="train", version=opt.version),
-            TBLogger(opt.logdir, name=None, sub_dir="valid", version=opt.version),
+            TBLogger(opt.logdir, name=None, sub_dir="train", version=f"version_{opt.version}"),
+            TBLogger(opt.logdir, name=None, sub_dir="valid", version=f"version_{opt.version}"),
         ],
     )
-
+    
+    torch.backends.cudnn.enabled = True
     torch.set_float32_matmul_precision("high")
     lightning_train_cplxMSTAR(opt, trainer)
