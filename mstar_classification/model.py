@@ -34,6 +34,7 @@ from torchvision.models import resnet18
 import lightning as L
 from torchmetrics.classification import Accuracy
 import torchcvnn.nn as c_nn
+import torchcvnn.models as c_models
 from monai.visualize import GradCAM
 
 # Local imports
@@ -63,17 +64,25 @@ class ViT(nn.Module):
         # The hidden_dim must be adapted to the hidden_dim of the ViT model
         # It is used as the output dimension of the patch embedder but must match
         # the expected hidden dim of your ViT
+
+        # Embedder
+
+        # Using Image2Patch and linear projection on embed_dim
+        # No positional encoding for now
+        # self.patch_embedder = nn.Sequential(embedders.Image2Patch(patch_size), 
+        #                                     nn.Linear(num_channels * (patch_size**2), embed_dim, dtype=torch.complex64))
+
+        # Using a ConvStem 
+        # No positional encoding for now
+        self.patch_embedder = embedders.ConvStem(num_channels, embed_dim, patch_size)
+
+        # Using Linear projection, class token, positional embedding
         num_patches = (input_size // patch_size) ** 2
         embedder = embedders.PatchEmbedderPos(num_patches, 
                                               patch_size, 
                                               embed_dim, 
                                               num_channels, 
                                               dropout)
-        # embedder = embedders.PatchEmbedder(input_size, 
-        #                                    num_channels, 
-        #                                    embed_dim, 
-        #                                    patch_size, 
-        #                                    norm_layer=norm_layer)
 
         # For using an off-the shelf ViT model, you can use the following code
         # If you go this way, do not forget to adapt the embed_dim above
@@ -103,153 +112,9 @@ class ViT(nn.Module):
     def forward(self, x):
         features = self.backbone(x)  # B, num_patches, embed_dim
 
-        # print(features.shape)
-    
-        # Global average pooling of the patches encoding
-        # mean_features = features.mean(dim=1)
-        # return self.head(mean_features)
-
         cls_features = features[:, 0]
+
         return self.head(cls_features)
-
-class Attention(nn.Module):
-    """Complex-valued attention layer for Vision Transformer, as proposed in "Building Blocks for a Complex-Valued Transformer Architecture" by Eilers et al.
-
-    Args:
-        embed_dim (int): Embedding dimension
-        num_heads (int): Number of attention heads
-    """
-    def __init__(self, embed_dim: int, num_heads: int) -> None:
-        super().__init__()
-
-        self.num_heads = num_heads
-        self.head_dim = embed_dim // num_heads
-        self.scale = self.head_dim**-0.5
-        self.q_norm = c_nn.RMSNorm(self.head_dim)
-        self.k_norm = c_nn.RMSNorm(self.head_dim)
-        self.qkv = nn.Linear(embed_dim, embed_dim * 3, dtype=torch.complex64)
-
-    def forward(self, x: Tensor) -> Tensor:
-        B, N, _ = x.shape
-        qkv = (
-            self.qkv(x)
-            .reshape(B, N, 3, self.num_heads, self.head_dim)
-            .permute(2, 0, 3, 1, 4) # (3, B, num_heads, num_patches, head_dim)
-            .contiguous()
-        )
-        q, k, v = qkv.unbind(0) # (B, num_heads, num_patches, head_dim)
-        q, k = self.q_norm(q), self.k_norm(k)
-        return self.scaled_dot_product_attention(q, k, v)
-
-    def scaled_dot_product_attention(self, q: Tensor, k: Tensor, v: Tensor) -> Tensor:
-        out = ((q @ k.transpose(-2, -1).conj()).real * self.scale).softmax(dim=-1)
-        return out.to(torch.complex64) @ v
-
-
-class Block(nn.Module):
-    """Vision Transformer block.
-
-    Args:
-        embed_dim (int): Embedded dimension
-        hidden_dim (int): Hidden dimension
-        num_heads (int): Number of attention heads
-        dropout (float): Dropout rate
-    """
-    def __init__(
-        self, embed_dim: int, hidden_dim: int, num_heads: int, dropout: float = 0.0
-    ) -> None:
-        super().__init__()
-
-        self.attn = Attention(embed_dim, num_heads)
-        self.layer_norm = c_nn.RMSNorm(embed_dim)
-        self.linear = nn.Sequential(
-            nn.Linear(embed_dim, hidden_dim, dtype=torch.complex64),
-            c_nn.CGELU(),
-            c_nn.Dropout(dropout),
-            nn.Linear(hidden_dim, embed_dim, dtype=torch.complex64),
-            c_nn.Dropout(dropout),
-        )
-
-    def forward(self, x: Tensor) -> Tensor:
-        B, N, C = x.shape
-        attn = self.attn(x).transpose(1, 2).reshape(B, N, C)
-        x = x + attn
-        x = x + self.linear(self.layer_norm(x))
-        # inp_x = self.layer_norm(x)
-        # x = x + self.attn(inp_x, inp_x, inp_x)[0]
-        # x = x + self.linear(self.layer_norm(x))
-
-        return x
-
-
-class VisionTransformer(nn.Module):
-    """Vision Transformer model implementation based on the paper "An image is worth 16x16 words: Transformers for image recognition at scale" by Dosovitskiy et al.
-    It is adapted to work with complex-valued inputs, with complex-valued blocks from torchcvnn, and a complex-valued attention layer.
-
-    Args:
-        opt (ArgumentParser): model configuration defined in the parser.
-        num_classes (int): Number of classes in the dataset.
-    """
-    # This module was implemented based on 
-    def __init__(self, opt: ArgumentParser, num_classes: int) -> None:
-
-        super().__init__()
-
-        patch_size = opt.patch_size
-        input_size = opt.input_size
-        embed_dim = opt.embed_dim
-        hidden_dim = opt.hidden_dim
-        num_layers = opt.num_layers
-        num_heads = opt.num_heads
-        num_channels = opt.num_channels
-        dropout = opt.dropout
-        attention_dropout = opt.attention_dropout
-        # norm_layer = opt.norm_layer
-        model_type = opt.model_type
-
-        assert (
-            input_size % patch_size == 0
-        ), "Image size must be divisible by the patch size"
-        num_patches = (input_size // patch_size) ** 2
-
-        # Define whether to use traditional ViT or hybrid-ViT
-        # if "hybrid" in model_type:
-        #     self.patch_embedder = ConvStem(num_channels, hidden_dim, patch_size)
-        #     embed_dim = int(num_channels * (patch_size**2) / 2) # TOCHECK: overwrite embed_dim ?
-        #     input_layer_channels = hidden_dim
-        # else:
-        #     self.patch_embedder = Image2Patch(patch_size)
-        #     input_layer_channels = num_channels * (patch_size**2)
-        if model_type != "vit":
-            raise RuntimeError(f"Model vit-hybrid not reimplemented yet")
-        
-        self.patch_embedder = embedders.PatchEmbedderPos(num_patches, patch_size, 
-                                                         embed_dim, 
-                                                         num_channels, dropout)
-
-        # Tranformer blocks
-        self.transformer = nn.Sequential(
-            *(
-                Block(
-                    embed_dim, hidden_dim, 
-                    num_heads, 
-                    dropout=attention_dropout
-                )
-                for _ in range(num_layers)
-            )
-        )
-        # MLP head
-        self.mlp_head = nn.Sequential(
-            c_nn.RMSNorm(embed_dim),
-            nn.Linear(embed_dim, num_classes, dtype=torch.complex64),
-        )
-
-    def forward(self, x: Tensor) -> Tensor:
-        x = self.patch_embedder(x)
-        x = self.transformer(x)
-
-        cls = x[:, 0] # position of cls_token
-        return self.mlp_head(cls)
 
 class BaseClassificationModule(L.LightningModule):
     def __init__(self, opt: ArgumentParser, num_classes: int = 10):
@@ -348,18 +213,13 @@ class BaseClassificationModule(L.LightningModule):
         )
         return self.convert_to_complex(model)
     
-    def define_tcnn_vit(self):
+    def define_vit(self):
         return ViT(self.opt, self.num_classes)
 
-    def define_vit(self):
-        return VisionTransformer(self.opt, self.num_classes)
-         
     def configure_model(self):
         choices = {
             "resnet18": self.define_resnet18, 
-            "vit": self.define_vit,
-            "hybrid-vit": self.define_vit,
-            "tcnn_vit": self.define_tcnn_vit
+            "vit": self.define_vit
         }
         model = choices[self.opt.model_type]()
             
@@ -376,7 +236,7 @@ class BaseClassificationModule(L.LightningModule):
         return self.model(x)
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
-        if "resnet18" in self.opt.model_type:
+        if self.opt.model_type == "resnet18":
             weight_decay = 0.05
             patience = 5
         else:

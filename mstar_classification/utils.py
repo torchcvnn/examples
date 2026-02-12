@@ -58,7 +58,7 @@ def train_parser(parser: ArgumentParser) -> ArgumentParser:
     parser.add_argument(
         "--norm_layer", type=str, choices=["layer_norm", "rms_norm"], default="rms_norm"
     )
-    parser.add_argument("--model_type", type=str, choices=["resnet18", "tcnn_vit", "vit", "hybrid-vit"], default="hybrid-vit")
+    parser.add_argument("--model_type", type=str, choices=["resnet18", "vit"], default="vit")
 
     return parser
 
