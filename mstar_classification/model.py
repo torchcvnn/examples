@@ -200,6 +200,7 @@ class VisionTransformer(nn.Module):
         dropout = opt.dropout
         attention_dropout = opt.attention_dropout
         # norm_layer = opt.norm_layer
+        model_type = opt.model_type
 
         assert (
             input_size % patch_size == 0
@@ -214,7 +215,9 @@ class VisionTransformer(nn.Module):
         # else:
         #     self.patch_embedder = Image2Patch(patch_size)
         #     input_layer_channels = num_channels * (patch_size**2)
-
+        if model_type != "vit":
+            raise RuntimeError(f"Model vit-hybrid not reimplmented yet")
+        
         self.patch_embedder = embedders.PatchEmbedderPos(num_patches, patch_size, 
                                                          embed_dim, 
                                                          num_channels, dropout)
