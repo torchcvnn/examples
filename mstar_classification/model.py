@@ -41,61 +41,71 @@ import embedders
 
 class Model(nn.Module):
 
-    _norm_layer = {
-        "layer_norm": c_nn.LayerNorm,
-        "rms_norm": c_nn.RMSNorm,
-    }
-
-    def __init__(self, opt: ArgumentParser, num_classes: int = 10):
+    def __init__(self, opt: dict, num_classes: int):
         super().__init__()
+
+        patch_size = opt.patch_size
+        input_size = opt.input_size
+        embed_dim = opt.embed_dim
+        hidden_dim = opt.hidden_dim
+        num_layers = opt.num_layers
+        num_heads = opt.num_heads
+        num_channels = opt.num_channels
+        dropout = opt.dropout
+        attention_dropout = opt.attention_dropout
+        norm_layer = opt.norm_layer
 
         # The hidden_dim must be adapted to the hidden_dim of the ViT model
         # It is used as the output dimension of the patch embedder but must match
         # the expected hidden dim of your ViT
-
-        embedder = PatchEmbedder(
-            opt.input_size,
-            1,
-            opt.hidden_dim,
-            opt.patch_size,
-            norm_layer=self._norm_layer[opt.norm_layer],
-        )
+        num_patches = (input_size // patch_size) ** 2
+        embedder = embedders.PatchEmbedderPos(num_patches, 
+                                              patch_size, 
+                                              embed_dim, 
+                                              num_channels, 
+                                              dropout)
+        # embedder = embedders.PatchEmbedder(input_size, 
+        #                                    num_channels, 
+        #                                    embed_dim, 
+        #                                    patch_size, 
+        #                                    norm_layer=norm_layer)
 
         # For using an off-the shelf ViT model, you can use the following code
-        # If you go this way, do not forget to adapt the hidden_dim above
+        # If you go this way, do not forget to adapt the embed_dim above
         # For vit_t, it is 192
         # self.backbone = c_models.vit_t(embedder)
 
         # For a custom ViT model, you can use the following code
-        # If you go this way, do not forget to adapt the hidden_dim above
+        # If you go this way, do not forget to adapt the embed_dim above
         # You can reduce it to 32 for example
-
-        mlp_dim = 4 * opt.hidden_dim
 
         self.backbone = c_nn.ViT(
             embedder,
-            opt.num_layers,
-            opt.num_heads,
-            opt.hidden_dim,
-            mlp_dim,
-            dropout=opt.dropout,
-            attention_dropout=opt.attention_dropout,
-            norm_layer=c_nn.LayerNorm,
+            num_layers,
+            num_heads,
+            embed_dim=embed_dim,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
+            attention_dropout=attention_dropout,
+            norm_layer=norm_layer,
         )
 
         # A Linear decoding head to project on the logits
         self.head = nn.Sequential(
-            nn.Linear(opt.hidden_dim, num_classes, dtype=torch.complex64), c_nn.Mod()
+            nn.Linear(embed_dim, num_classes, dtype=torch.complex64)
         )
 
-    def forward(self, x: Tensor) -> Tensor:
-        features = self.backbone(x)  # B, num_patches, hidden_dim
+    def forward(self, x):
+        features = self.backbone(x)  # B, num_patches, embed_dim
 
+        # print(features.shape)
+    
         # Global average pooling of the patches encoding
-        mean_features = features.mean(dim=1)
+        # mean_features = features.mean(dim=1)
+        # return self.head(mean_features)
 
-        return self.head(mean_features)
-
+        cls_features = features[:, 0]
+        return self.head(cls_features)
 
 class Attention(nn.Module):
     """Complex-valued attention layer for Vision Transformer, as proposed in "Building Blocks for a Complex-Valued Transformer Architecture" by Eilers et al.
@@ -180,65 +190,58 @@ class VisionTransformer(nn.Module):
 
         super().__init__()
 
-        self.patch_size = opt.patch_size
+        patch_size = opt.patch_size
+        input_size = opt.input_size
+        embed_dim = opt.embed_dim
+        hidden_dim = opt.hidden_dim
+        num_layers = opt.num_layers
+        num_heads = opt.num_heads
+        num_channels = opt.num_channels
+        dropout = opt.dropout
+        attention_dropout = opt.attention_dropout
+        # norm_layer = opt.norm_layer
+
         assert (
-            opt.input_size % opt.patch_size == 0
+            input_size % patch_size == 0
         ), "Image size must be divisible by the patch size"
-        self.num_patches = (opt.input_size // opt.patch_size) ** 2
+        num_patches = (input_size // patch_size) ** 2
+
         # Define whether to use traditional ViT or hybrid-ViT
-        if "hybrid" in opt.model_type:
-            self.patch_embedder = ConvStem(opt.num_channels, opt.hidden_dim, opt.patch_size)
-            self.embed_dim = int(opt.num_channels * (opt.patch_size**2) / 2)
-            input_layer_channels = opt.hidden_dim
-        else:
-            self.patch_embedder = Image2Patch(opt.patch_size)
-            self.embed_dim = int(opt.hidden_dim / 2)
-            input_layer_channels = opt.num_channels * (opt.patch_size**2)
-        # Input layer
-        self.input_layer = nn.Linear(
-            input_layer_channels, self.embed_dim, dtype=torch.complex64
-        )
+        # if "hybrid" in model_type:
+        #     self.patch_embedder = ConvStem(num_channels, hidden_dim, patch_size)
+        #     embed_dim = int(num_channels * (patch_size**2) / 2) # TOCHECK: overwrite embed_dim ?
+        #     input_layer_channels = hidden_dim
+        # else:
+        #     self.patch_embedder = Image2Patch(patch_size)
+        #     input_layer_channels = num_channels * (patch_size**2)
+
+        self.patch_embedder = embedders.PatchEmbedderPos(num_patches, patch_size, 
+                                                         embed_dim, 
+                                                         num_channels, dropout)
+
         # Tranformer blocks
         self.transformer = nn.Sequential(
             *(
                 Block(
-                    self.embed_dim, opt.hidden_dim, opt.num_heads, dropout=opt.dropout
+                    embed_dim, hidden_dim, 
+                    num_heads, 
+                    dropout=attention_dropout
                 )
-                for _ in range(opt.num_layers)
+                for _ in range(num_layers)
             )
         )
         # MLP head
         self.mlp_head = nn.Sequential(
-            c_nn.RMSNorm(self.embed_dim),
-            nn.Linear(self.embed_dim, num_classes, dtype=torch.complex64),
-        )
-        self.dropout = c_nn.Dropout(opt.dropout)
-        # Class tokens
-        self.cls_token = nn.Parameter(
-            torch.rand(1, 1, self.embed_dim, dtype=torch.complex64)
-        )
-        # Positional embeddings
-        self.pos_embedding = nn.Parameter(
-            torch.rand(1, 1 + self.num_patches, self.embed_dim, dtype=torch.complex64)
+            c_nn.RMSNorm(embed_dim),
+            nn.Linear(embed_dim, num_classes, dtype=torch.complex64),
         )
 
     def forward(self, x: Tensor) -> Tensor:
         x = self.patch_embedder(x)
-        B, T, _ = x.shape
-        x = self.input_layer(x)
-
-        cls_token = self.cls_token.repeat(B, 1, 1)
-        x = torch.cat([cls_token, x], dim=1)
-        x = x + self.pos_embedding
-
-        x = self.dropout(x)
         x = self.transformer(x)
 
         cls = x[:, 0] # position of cls_token
         return self.mlp_head(cls)
-
-
-
 
 class BaseClassificationModule(L.LightningModule):
     def __init__(self, opt: ArgumentParser, num_classes: int = 10):
