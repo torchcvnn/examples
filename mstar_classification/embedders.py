@@ -21,7 +21,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# Standard imports
+from typing import Union, Tuple
+
 # External imports
+import torch
+from torch import Tensor
 import torch.nn as nn
 import torchcvnn.nn as c_nn
 
