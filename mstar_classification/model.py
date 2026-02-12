@@ -39,7 +39,12 @@ from monai.visualize import GradCAM
 # Local imports
 import embedders
 
-class Model(nn.Module):
+class ViT(nn.Module):
+
+    _norm_layer = {
+        "layer_norm": c_nn.LayerNorm,
+        "rms_norm": c_nn.RMSNorm,
+    }
 
     def __init__(self, opt: dict, num_classes: int):
         super().__init__()
@@ -53,7 +58,7 @@ class Model(nn.Module):
         num_channels = opt.num_channels
         dropout = opt.dropout
         attention_dropout = opt.attention_dropout
-        norm_layer = opt.norm_layer
+        norm_layer = self._norm_layer[opt.norm_layer]
 
         # The hidden_dim must be adapted to the hidden_dim of the ViT model
         # It is used as the output dimension of the patch embedder but must match
@@ -216,7 +221,7 @@ class VisionTransformer(nn.Module):
         #     self.patch_embedder = Image2Patch(patch_size)
         #     input_layer_channels = num_channels * (patch_size**2)
         if model_type != "vit":
-            raise RuntimeError(f"Model vit-hybrid not reimplmented yet")
+            raise RuntimeError(f"Model vit-hybrid not reimplemented yet")
         
         self.patch_embedder = embedders.PatchEmbedderPos(num_patches, patch_size, 
                                                          embed_dim, 
@@ -343,14 +348,20 @@ class BaseClassificationModule(L.LightningModule):
         )
         return self.convert_to_complex(model)
     
+    def define_tcnn_vit(self):
+        return ViT(self.opt, self.num_classes)
+
     def define_vit(self):
         return VisionTransformer(self.opt, self.num_classes)
          
     def configure_model(self):
-        choices = {"resnet18": self.define_resnet18, "vit": self.define_vit}
-        for choice, model_fn in choices.items():
-            if choice in self.opt.model_type:
-                model = model_fn()
+        choices = {
+            "resnet18": self.define_resnet18, 
+            "vit": self.define_vit,
+            "hybrid-vit": self.define_vit,
+            "tcnn_vit": self.define_tcnn_vit
+        }
+        model = choices[self.opt.model_type]()
             
         model = nn.Sequential(
             model,
