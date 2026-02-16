@@ -36,11 +36,20 @@ class Image2Patch(nn.Module):
     Args:
         patch_size (int): size of the patch
     """
-    def __init__(self, patch_size: int, flatten_channels: bool = True):
+    def __init__(self,
+            patch_size: int, 
+            flatten_channels: bool = True):
         super().__init__()
         self.patch_size = patch_size
 
     def forward(self, x: Tensor) -> Tensor:
+        """
+        Args:
+            x (torch.Tensor): Input image tensor of shape (B, C, H, W).
+
+        Returns:
+            torch.Tensor: Patch embeddings of shape (B, (H // patch_size) * (W // patch_size), C * patch_size * patch_size).
+        """
         B, C, H, W = x.shape
 
         assert (
@@ -51,8 +60,8 @@ class Image2Patch(nn.Module):
         x = x.reshape(B, C, H // self.patch_size, self.patch_size, W // self.patch_size, self.patch_size)
 
         # Permute axis. Shape of x after permute: (B, number of patch along H, number of patch along W, C, patch_size, patch_size)
-
         x = x.permute(0, 2, 4, 1, 3, 5)
+
         # Flatten 1st and 2nd axis to obtain to total amount of patches. Shape of x after flatten: (B, number of patch, C, patch_size, patch_size)
         x = x.flatten(1, 2)
 
@@ -102,7 +111,7 @@ class ConvStem(nn.Module):
             x (torch.Tensor): Input image tensor of shape (B, C, H, W).
 
         Returns:
-            torch.Tensor: Patch embeddings of shape (B, embed_dim, H, W).
+            torch.Tensor: Patch embeddings of shape (B, num_patches, embed_dim).
         """
         # Apply the convolutional stem. Output shape: (B, embed_dim, num_patches_H, num_patches_W)
         x = self.conv(x)
@@ -152,6 +161,54 @@ class PatchEmbedderPos(nn.Module):
 
         x = self.dropout(x) # B, 1 + number_of_patch, embed_dim
 
+        return x
+
+class ClsToken(nn.Module):
+
+    def __init__(self, 
+            embed_dim: int):
+        super().__init__()
+        
+        # Class tokens
+        self.cls_token = nn.Parameter(
+            torch.rand(1, 1, embed_dim, dtype=torch.complex64)
+        )
+
+    def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): Input image tensor of shape (B, num_of_patches, eùbed_dim).
+
+        Returns:
+            torch.Tensor: Patch embeddings of shape (B, number_of_patchs + 1, embed_dim).
+        """
+        B = x.shape[0]
+        cls_token = self.cls_token.repeat(B, 1, 1)
+        x = torch.cat([cls_token, x], dim=1) # B, 1 + number_of_patch, embed_dim
+
+        return x
+
+class PosEmbedder(nn.Module):
+
+    def __init__(self, 
+                 num_patches: int, 
+                 embed_dim: int):
+        super().__init__()
+        
+        # Positional embeddings
+        self.pos_embedding = nn.Parameter(
+            torch.rand(1, num_patches, embed_dim, dtype=torch.complex64)
+        )
+
+    def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): Input image tensor of shape (B, num_of_patches, eùbed_dim).
+
+        Returns:
+            torch.Tensor: Patch embeddings of shape (B, number_of_patchs, embed_dim).
+        """
+        x = x + self.pos_embedding
         return x
 
 class RopeEmbedder(nn.Module):

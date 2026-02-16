@@ -60,7 +60,7 @@ def train_parser(parser: ArgumentParser) -> ArgumentParser:
     )
     parser.add_argument(
             "--embedder", type=str, 
-            choices=["PatchEmbedderPos", "ConvStem", "Image2Patch"], 
+            choices=["PatchEmbedderPos", "ConvStem"], 
             default="PatchEmbedderPos"
     )
     parser.add_argument("--model_type", type=str, choices=["resnet18", "vit"], default="vit")

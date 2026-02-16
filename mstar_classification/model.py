@@ -67,23 +67,31 @@ class ViT(nn.Module):
 
         # Embedder
 
-        # Using Image2Patch and linear projection on embed_dim
-        # No positional encoding for now
-        if opt.embedder == "Image2Patch":
-            embedder = nn.Sequential(embedders.Image2Patch(patch_size), 
-                                     nn.Linear(num_channels * (patch_size**2), embed_dim, dtype=torch.complex64))
-        elif opt.embedder == "ConvStem":
+        if opt.embedder == "ConvStem":
             # Using a ConvStem 
-            # No positional encoding for now
-            embedder = embedders.ConvStem(num_channels, embed_dim, patch_size)
+            # embedder = embedders.ConvStem(num_channels, embed_dim, patch_size)
+            num_patches = (input_size // patch_size) ** 2
+            embedder = nn.Sequential(
+                    embedders.ConvStem(num_channels, embed_dim, patch_size), 
+                    embedders.ClsToken(embed_dim),
+                    embedders.PosEmbedder(num_patches + 1, embed_dim),
+                    c_nn.Dropout(dropout)
+                    )
         elif opt.embedder == "PatchEmbedderPos":
             # Using Linear projection, class token, positional embedding
             num_patches = (input_size // patch_size) ** 2
-            embedder = embedders.PatchEmbedderPos(num_patches, 
-                                                  patch_size, 
-                                                  embed_dim, 
-                                                  num_channels, 
-                                                  dropout)
+            # embedder = embedders.PatchEmbedderPos(num_patches, 
+            #                                       patch_size, 
+            #                                       embed_dim, 
+            #                                       num_channels, 
+            #                                       dropout)
+            embedder = nn.Sequential(
+                    embedders.Image2Patch(patch_size), 
+                    nn.Linear(num_channels * (patch_size**2), embed_dim, dtype=torch.complex64),
+                    embedders.ClsToken(embed_dim),
+                    embedders.PosEmbedder(num_patches + 1, embed_dim),
+                    c_nn.Dropout(dropout)
+                    )
 
         # For using an off-the shelf ViT model, you can use the following code
         # If you go this way, do not forget to adapt the embed_dim above
