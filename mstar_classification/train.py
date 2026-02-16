@@ -143,12 +143,12 @@ if __name__ == "__main__":
         enable_checkpointing=True,
         callbacks=[
             CustomProgressBar(),
-            EarlyStopping(
-                monitor="val_loss",
-                verbose=True,
-                patience=opt.patience,
-                min_delta=0.0002,
-            ),
+            # EarlyStopping(
+            #     monitor="val_loss",
+            #     verbose=True,
+            #     patience=opt.patience,
+            #     min_delta=0.0002,
+            # ),
             LearningRateMonitor(logging_interval="epoch"),
             ModelCheckpoint(
                 dirpath=weightdir, monitor="val_Accuracy", verbose=True, mode="max"
