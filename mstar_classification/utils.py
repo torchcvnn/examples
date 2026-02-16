@@ -58,6 +58,11 @@ def train_parser(parser: ArgumentParser) -> ArgumentParser:
     parser.add_argument(
         "--norm_layer", type=str, choices=["layer_norm", "rms_norm"], default="rms_norm"
     )
+    parser.add_argument(
+            "--embedder", type=str, 
+            choices=["PatchEmbedderPos", "ConvStem", "Image2Patch"], 
+            default="PatchEmbedderPos"
+    )
     parser.add_argument("--model_type", type=str, choices=["resnet18", "vit"], default="vit")
 
     return parser
