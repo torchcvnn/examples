@@ -96,7 +96,7 @@ def get_dataloaders(
     valid_loader = DataLoader(
         valid_dataset,
         batch_size=opt.batch_size,
-        shuffle=True,
+        shuffle=False,
         num_workers=4,
         persistent_workers=True,
         pin_memory=True,
